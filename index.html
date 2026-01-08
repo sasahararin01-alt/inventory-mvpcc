@@ -8,8 +8,8 @@
   <!-- Firebase -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
-    import { getAuth } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
-    import { getFirestore } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
+    import { getFirestore, doc, getDoc, setDoc, updateDoc, serverTimestamp }
+      from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyCaFkgFPGtYN0GJdo-20mRHJqLLOfsaAFI",
@@ -18,8 +18,28 @@
     };
 
     const app = initializeApp(firebaseConfig);
-    window.auth = getAuth(app);
-    window.db = getFirestore(app);
+    const db = getFirestore(app);
+
+    // グローバルに使えるようにする
+    window.saveProduct = async function (barcode) {
+      const ref = doc(db, "products", barcode);
+      const snap = await getDoc(ref);
+
+      if (snap.exists()) {
+        await updateDoc(ref, {
+          stock: snap.data().stock + 1,
+          updatedAt: serverTimestamp()
+        });
+      } else {
+        await setDoc(ref, {
+          barcode: barcode,
+          name: "未設定",
+          stock: 1,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        });
+      }
+    };
   </script>
 </head>
 
@@ -27,9 +47,7 @@
   <h1>在庫管理アプリ</h1>
 
   <button id="scanBtn">📷 バーコードを読み取る</button>
-
   <p id="result">未読み取り</p>
-
   <div id="scanner" style="width:100%; max-width:400px;"></div>
 
   <script src="https://unpkg.com/quagga@0.12.1/dist/quagga.min.js"></script>
@@ -43,13 +61,9 @@
         inputStream: {
           type: "LiveStream",
           target: document.querySelector("#scanner"),
-          constraints: {
-            facingMode: "environment"
-          }
+          constraints: { facingMode: "environment" }
         },
-        decoder: {
-          readers: ["ean_reader"]
-        }
+        decoder: { readers: ["ean_reader"] }
       }, err => {
         if (err) {
           alert("カメラ起動失敗");
@@ -58,21 +72,19 @@
         Quagga.start();
       });
 
-      Quagga.onDetected(data => {
+      Quagga.onDetected(async data => {
         const code = data.codeResult.code;
         result.textContent = "バーコード: " + code;
         Quagga.stop();
+
+        // 🔥 Firestore に保存
+        await window.saveProduct(code);
+        alert("Firestore に保存しました");
       });
     });
   </script>
 </body>
-</html><!DOCTYPE html>
-<html lang="ja">
-<head>
-  <meta charset="UTF-8">
-  <title>在庫管理</title>
-</head>
-<body>
+</html>
   <h1>在庫管理アプリ</h1>
 </body>
 </html>
