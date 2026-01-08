@@ -8,8 +8,14 @@
   <!-- Firebase -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
-    import { getFirestore, doc, getDoc, setDoc, updateDoc, serverTimestamp }
-      from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
+    import {
+      getFirestore,
+      doc,
+      getDoc,
+      setDoc,
+      updateDoc,
+      serverTimestamp
+    } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyCaFkgFPGtYN0GJdo-20mRHJqLLOfsaAFI",
@@ -20,7 +26,7 @@
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
 
-    // グローバルに使えるようにする
+    // 🔥 バーコードから商品を保存・加算
     window.saveProduct = async function (barcode) {
       const ref = doc(db, "products", barcode);
       const snap = await getDoc(ref);
@@ -50,6 +56,7 @@
   <p id="result">未読み取り</p>
   <div id="scanner" style="width:100%; max-width:400px;"></div>
 
+  <!-- Quagga -->
   <script src="https://unpkg.com/quagga@0.12.1/dist/quagga.min.js"></script>
 
   <script>
@@ -66,7 +73,7 @@
         decoder: { readers: ["ean_reader"] }
       }, err => {
         if (err) {
-          alert("カメラ起動失敗");
+          alert("カメラ起動失敗: " + err);
           return;
         }
         Quagga.start();
@@ -74,17 +81,18 @@
 
       Quagga.onDetected(async data => {
         const code = data.codeResult.code;
+
         result.textContent = "バーコード: " + code;
         Quagga.stop();
 
-        // 🔥 Firestore に保存
-        await window.saveProduct(code);
-        alert("Firestore に保存しました");
+        try {
+          await window.saveProduct(code);
+          alert("Firestore に保存しました");
+        } catch (e) {
+          alert("保存エラー: " + e.message);
+        }
       });
     });
   </script>
-</body>
-</html>
-  <h1>在庫管理アプリ</h1>
 </body>
 </html>
