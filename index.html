@@ -3,6 +3,35 @@
 <head>
   <meta charset="UTF-8">
   <title>在庫管理</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <!-- Firebase -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
+    import { getAuth } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
+    import { getFirestore } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyCaFkgFPGtYN0GJdo-20mRHJqLLOfsaAFI",
+      authDomain: "inventory-mvpcc.firebaseapp.com",
+      projectId: "inventory-mvpcc"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    window.auth = getAuth(app);
+    window.db = getFirestore(app);
+  </script>
+</head>
+
+<body>
+  <h1>在庫管理アプリ</h1>
+  <p>Firebase 接続確認用</p>
+</body>
+</html><!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>在庫管理</title>
 </head>
 <body>
   <h1>在庫管理アプリ</h1>
