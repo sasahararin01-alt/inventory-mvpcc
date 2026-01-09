@@ -3,10 +3,12 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>在庫管理アプリ 完全版</title>
+  <title>在庫管理アプリ 完全版（認証付き）</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
   <style>
+    body { font-family: sans-serif; padding: 10px; }
+    .hidden { display: none; }
     .out { color: red; font-weight: bold; }
     .product { border-bottom: 1px solid #ccc; padding: 10px 0; margin-bottom: 10px; }
     input { width: 90%; margin-bottom: 4px; }
@@ -18,34 +20,51 @@
 
   <!-- Firebase -->
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 </head>
-
 <body>
-  <h1>在庫管理アプリ 完全版</h1>
+  <h1>在庫管理アプリ（認証付き）</h1>
 
-  <button id="scanBtn">📷 バーコードを読み取る</button>
-  <p id="result">未読み取り</p>
-  <div id="scanner" style="max-width:400px;"></div>
-
-  <div style="margin-top:10px;">
-    数量:
-    <input id="qty" type="number" value="1" min="1" style="width:60px;">
-    <br><br>
-    <button onclick="manualAdjust('in')">📦 手動仕入</button>
-    <button onclick="manualAdjust('out')">🛒 手動販売</button>
+  <!-- ログイン画面 -->
+  <div id="loginDiv">
+    <h2>ログイン</h2>
+    メール:<br>
+    <input id="email" type="email"><br>
+    パスワード:<br>
+    <input id="password" type="password"><br>
+    <button onclick="login()">ログイン</button>
+    <button onclick="signup()">新規登録</button>
+    <p id="loginMsg" style="color:red;"></p>
   </div>
 
-  <hr>
-  <h3>絞り込み検索</h3>
-  メーカー: <input id="filterMaker" placeholder="例: meiji">
-  カテゴリ: <input id="filterCategory" placeholder="例: 飲料">
-  <button onclick="applyFilter()">適用</button>
-  <button onclick="clearFilter()">解除</button>
+  <!-- アプリ本体 -->
+  <div id="appDiv" class="hidden">
+    <button onclick="logout()">ログアウト</button>
+    <hr>
+    <button id="scanBtn">📷 バーコードを読み取る</button>
+    <p id="result">未読み取り</p>
+    <div id="scanner" style="max-width:400px;"></div>
 
-  <hr>
-  <h2>商品一覧</h2>
-  <ul id="productList"></ul>
+    <div style="margin-top:10px;">
+      数量:
+      <input id="qty" type="number" value="1" min="1" style="width:60px;">
+      <br><br>
+      <button onclick="manualAdjust('in')">📦 手動仕入</button>
+      <button onclick="manualAdjust('out')">🛒 手動販売</button>
+    </div>
+
+    <hr>
+    <h3>絞り込み検索</h3>
+    メーカー: <input id="filterMaker" placeholder="例: meiji">
+    カテゴリ: <input id="filterCategory" placeholder="例: 飲料">
+    <button onclick="applyFilter()">適用</button>
+    <button onclick="clearFilter()">解除</button>
+
+    <hr>
+    <h2>商品一覧</h2>
+    <ul id="productList"></ul>
+  </div>
 
   <!-- モーダル -->
   <div id="modal" class="modal">
@@ -69,17 +88,37 @@
   <script src="https://unpkg.com/quagga@0.12.1/dist/quagga.min.js"></script>
 
   <script>
+    // Firebase 初期化
     const firebaseConfig = {
       apiKey: "AIzaSyCaFkgFPGtYN0GJdo-20mRHJqLLOfsaAFI",
       authDomain: "inventory-mvpcc.firebaseapp.com",
       projectId: "inventory-mvpcc"
     };
     firebase.initializeApp(firebaseConfig);
+    const auth = firebase.auth();
     const db = firebase.firestore();
 
     let currentBarcode = null;
     let currentFilter = { maker: "", category: "" };
 
+    // 認証関数
+    function login() {
+      const email = document.getElementById("email").value;
+      const password = document.getElementById("password").value;
+      auth.signInWithEmailAndPassword(email, password)
+        .then(()=>{ document.getElementById("loginDiv").classList.add("hidden"); document.getElementById("appDiv").classList.remove("hidden"); loadProducts(); })
+        .catch(e=>document.getElementById("loginMsg").textContent=e.message);
+    }
+    function signup() {
+      const email = document.getElementById("email").value;
+      const password = document.getElementById("password").value;
+      auth.createUserWithEmailAndPassword(email, password)
+        .then(()=>login())
+        .catch(e=>document.getElementById("loginMsg").textContent=e.message);
+    }
+    function logout() { auth.signOut(); location.reload(); }
+
+    // Firestore 連動関数
     async function ensureProduct(barcode) {
       const ref = db.collection("products").doc(barcode);
       const snap = await ref.get();
@@ -107,9 +146,7 @@
       document.getElementById("modal").style.display = "flex";
     }
 
-    function closeModal() {
-      document.getElementById("modal").style.display = "none";
-    }
+    function closeModal() { document.getElementById("modal").style.display = "none"; }
 
     async function submitModal(type) {
       const qty = Number(document.getElementById("modalQty").value);
@@ -126,35 +163,20 @@
         stock += qty;
         if(retail>0) retailPrice = retail;
         await ref.collection("history").add({
-          type:'in',
-          quantity: qty,
-          price: price,
+          type:'in', quantity: qty, price: price,
           date: firebase.firestore.FieldValue.serverTimestamp()
         });
       } else {
         if(stock<qty) return alert("在庫が足りません");
         stock -= qty;
         await ref.collection("history").add({
-          type:'out',
-          quantity: qty,
+          type:'out', quantity: qty,
           date: firebase.firestore.FieldValue.serverTimestamp()
         });
       }
 
       await ref.update({ stock, averageCost, retailPrice, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
       closeModal();
-      loadProducts();
-    }
-
-    function applyFilter() {
-      currentFilter.maker = document.getElementById("filterMaker").value.trim();
-      currentFilter.category = document.getElementById("filterCategory").value.trim();
-      loadProducts();
-    }
-    function clearFilter() {
-      document.getElementById("filterMaker").value = "";
-      document.getElementById("filterCategory").value = "";
-      currentFilter = { maker: "", category: "" };
       loadProducts();
     }
 
@@ -182,8 +204,6 @@
 
     async function deleteProduct(barcode){
       if(!confirm("本当に削除しますか？履歴も全て消えます")) return;
-
-      // 履歴削除 + 商品削除
       const historySnap = await db.collection("products").doc(barcode).collection("history").get();
       const batch = db.batch();
       historySnap.forEach(doc => batch.delete(doc.ref));
@@ -239,6 +259,18 @@
       });
     }
 
+    function applyFilter() {
+      currentFilter.maker = document.getElementById("filterMaker").value.trim();
+      currentFilter.category = document.getElementById("filterCategory").value.trim();
+      loadProducts();
+    }
+    function clearFilter() {
+      document.getElementById("filterMaker").value = "";
+      document.getElementById("filterCategory").value = "";
+      currentFilter = { maker: "", category: "" };
+      loadProducts();
+    }
+
     // バーコードスキャン
     document.getElementById("scanBtn").addEventListener("click",()=>{
       Quagga.init({
@@ -255,7 +287,11 @@
       });
     });
 
-    loadProducts();
+    // 認証状態監視
+    auth.onAuthStateChanged(user=>{
+      if(user){ document.getElementById("loginDiv").classList.add("hidden"); document.getElementById("appDiv").classList.remove("hidden"); loadProducts(); }
+      else { document.getElementById("loginDiv").classList.remove("hidden"); document.getElementById("appDiv").classList.add("hidden"); }
+    });
   </script>
 </body>
 </html>
