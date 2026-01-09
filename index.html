@@ -13,7 +13,15 @@
     }
     .product {
       border-bottom: 1px solid #ccc;
-      padding: 8px 0;
+      padding: 10px 0;
+    }
+    input {
+      width: 90%;
+      margin-bottom: 4px;
+    }
+    button.saveBtn {
+      margin-top: 4px;
+      margin-bottom: 4px;
     }
   </style>
 
@@ -44,6 +52,7 @@
   <script src="https://unpkg.com/quagga@0.12.1/dist/quagga.min.js"></script>
 
   <script>
+    // Firebase 初期化
     const firebaseConfig = {
       apiKey: "AIzaSyCaFkgFPGtYN0GJdo-20mRHJqLLOfsaAFI",
       authDomain: "inventory-mvpcc.firebaseapp.com",
@@ -55,6 +64,7 @@
 
     let currentBarcode = null;
 
+    // 商品が存在しなければ作成
     async function ensureProduct(barcode) {
       const ref = db.collection("products").doc(barcode);
       const snap = await ref.get();
@@ -71,6 +81,7 @@
       }
     }
 
+    // 仕入／販売で在庫を調整
     async function adjustStock(type) {
       if (!currentBarcode) return alert("先にバーコードを読み取ってください");
 
@@ -95,6 +106,24 @@
       loadProducts();
     }
 
+    // 商品情報をその場で保存
+    async function saveInfo(barcode) {
+      const name = document.getElementById("name_" + barcode).value;
+      const maker = document.getElementById("maker_" + barcode).value;
+      const category = document.getElementById("category_" + barcode).value;
+
+      await db.collection("products").doc(barcode).update({
+        name,
+        manufacturer: maker,
+        category,
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+
+      alert("保存しました");
+      loadProducts();
+    }
+
+    // 商品一覧を読み込み
     async function loadProducts() {
       const list = document.getElementById("productList");
       list.innerHTML = "";
@@ -106,21 +135,26 @@
         li.className = "product";
 
         li.innerHTML = `
-          商品名：${p.name || "未設定"}<br>
-          メーカー：${p.manufacturer || "-"}<br>
-          カテゴリ：${p.category || "-"}<br>
+          <label>商品名:</label><br>
+          <input id="name_${p.barcode}" value="${p.name || ""}" placeholder="商品名"><br>
+          <label>メーカー:</label><br>
+          <input id="maker_${p.barcode}" value="${p.manufacturer || ""}" placeholder="メーカー"><br>
+          <label>カテゴリ:</label><br>
+          <input id="category_${p.barcode}" value="${p.category || ""}" placeholder="カテゴリ"><br>
           在庫：
           ${
             p.stock === 0
               ? `<span class="out">0（在庫切れ）</span>`
               : p.stock
           }
+          <br>
+          <button class="saveBtn" onclick="saveInfo('${p.barcode}')">保存</button>
         `;
-
         list.appendChild(li);
       });
     }
 
+    // バーコードスキャン
     document.getElementById("scanBtn").addEventListener("click", () => {
       Quagga.init({
         inputStream: {
@@ -139,6 +173,7 @@
         Quagga.stop();
         document.getElementById("result").textContent = "バーコード: " + currentBarcode;
         await ensureProduct(currentBarcode);
+        loadProducts();
       });
     });
 
