@@ -28,39 +28,36 @@
 
     window.currentBarcode = null;
 
-    // 商品保存（在庫+1）
-    window.saveProduct = async function (barcode) {
+    // 在庫増減
+    window.updateStock = async function (type, qty) {
+      const ref = doc(db, "products", window.currentBarcode);
+      const snap = await getDoc(ref);
+
+      if (!snap.exists()) return;
+
+      const current = snap.data().stock || 0;
+      const diff = type === "in" ? qty : -qty;
+
+      await updateDoc(ref, {
+        stock: current + diff,
+        updatedAt: serverTimestamp()
+      });
+    };
+
+    // 商品初期保存
+    window.ensureProduct = async function (barcode) {
       const ref = doc(db, "products", barcode);
       const snap = await getDoc(ref);
 
-      if (snap.exists()) {
-        await updateDoc(ref, {
-          stock: snap.data().stock + 1,
-          updatedAt: serverTimestamp()
-        });
-      } else {
+      if (!snap.exists()) {
         await setDoc(ref, {
           barcode: barcode,
           name: "未設定",
-          stock: 1,
+          stock: 0,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp()
         });
       }
-    };
-
-    // 商品名更新
-    window.updateProductName = async function () {
-      const nameInput = document.getElementById("nameInput");
-      if (!window.currentBarcode) return;
-
-      const ref = doc(db, "products", window.currentBarcode);
-      await updateDoc(ref, {
-        name: nameInput.value,
-        updatedAt: serverTimestamp()
-      });
-
-      alert("商品名を保存しました");
     };
   </script>
 </head>
@@ -75,10 +72,14 @@
 
   <div style="margin-top:16px;">
     <label>
-      商品名：
-      <input id="nameInput" type="text" placeholder="商品名を入力">
+      数量：
+      <input id="qtyInput" type="number" value="1" min="1">
     </label>
-    <button onclick="updateProductName()">商品名を保存</button>
+  </div>
+
+  <div style="margin-top:8px;">
+    <button onclick="updateStock('in', Number(qtyInput.value))">仕入</button>
+    <button onclick="updateStock('out', Number(qtyInput.value))">販売</button>
   </div>
 
   <!-- Quagga -->
@@ -87,6 +88,7 @@
   <script>
     const scanBtn = document.getElementById("scanBtn");
     const result = document.getElementById("result");
+    const qtyInput = document.getElementById("qtyInput");
 
     scanBtn.addEventListener("click", () => {
       Quagga.init({
@@ -112,9 +114,9 @@
         Quagga.stop();
 
         try {
-          await window.saveProduct(code);
+          await window.ensureProduct(code);
         } catch (e) {
-          alert("保存エラー: " + e.message);
+          alert("初期化エラー: " + e.message);
         }
       });
     });
