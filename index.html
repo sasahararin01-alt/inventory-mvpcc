@@ -6,6 +6,13 @@
   <title>在庫管理アプリ</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
+  <style>
+    .out {
+      color: red;
+      font-weight: bold;
+    }
+  </style>
+
   <!-- Firebase -->
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
@@ -27,23 +34,12 @@
   </div>
 
   <hr>
-
-  <h3>絞り込み</h3>
-  メーカー:
-  <input id="filterMaker" placeholder="例: meiji">
-  カテゴリ:
-  <input id="filterCategory" placeholder="例: 飲料">
-  <button onclick="applyFilter()">適用</button>
-  <button onclick="clearFilter()">解除</button>
-
-  <hr>
   <h2>商品一覧</h2>
   <ul id="productList"></ul>
 
   <script src="https://unpkg.com/quagga@0.12.1/dist/quagga.min.js"></script>
 
   <script>
-    // Firebase 初期化
     const firebaseConfig = {
       apiKey: "AIzaSyCaFkgFPGtYN0GJdo-20mRHJqLLOfsaAFI",
       authDomain: "inventory-mvpcc.firebaseapp.com",
@@ -54,7 +50,6 @@
     const db = firebase.firestore();
 
     let currentBarcode = null;
-    let currentFilter = { maker: "", category: "" };
 
     async function ensureProduct(barcode) {
       const ref = db.collection("products").doc(barcode);
@@ -63,8 +58,6 @@
         await ref.set({
           barcode,
           name: "",
-          manufacturer: "",
-          category: "",
           stock: 0,
           createdAt: firebase.firestore.FieldValue.serverTimestamp(),
           updatedAt: firebase.firestore.FieldValue.serverTimestamp()
@@ -94,30 +87,6 @@
       });
 
       loadProducts();
-      alert(type === "in" ? "仕入しました" : "販売しました");
-    }
-
-    async function saveProductInfo(barcode, n, m, c) {
-      await db.collection("products").doc(barcode).update({
-        name: document.getElementById(n).value,
-        manufacturer: document.getElementById(m).value,
-        category: document.getElementById(c).value,
-        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-      });
-      alert("保存しました");
-    }
-
-    function applyFilter() {
-      currentFilter.maker = document.getElementById("filterMaker").value;
-      currentFilter.category = document.getElementById("filterCategory").value;
-      loadProducts();
-    }
-
-    function clearFilter() {
-      document.getElementById("filterMaker").value = "";
-      document.getElementById("filterCategory").value = "";
-      currentFilter = { maker: "", category: "" };
-      loadProducts();
     }
 
     async function loadProducts() {
@@ -127,24 +96,14 @@
 
       snap.forEach(doc => {
         const p = doc.data();
-
-        if (
-          (currentFilter.maker && p.manufacturer !== currentFilter.maker) ||
-          (currentFilter.category && p.category !== currentFilter.category)
-        ) return;
-
-        const n = "n_" + p.barcode;
-        const m = "m_" + p.barcode;
-        const c = "c_" + p.barcode;
-
         const li = document.createElement("li");
-        li.innerHTML = `
-          <input id="${n}" value="${p.name || ""}" placeholder="商品名">
-          <input id="${m}" value="${p.manufacturer || ""}" placeholder="メーカー">
-          <input id="${c}" value="${p.category || ""}" placeholder="カテゴリ">
-          在庫: ${p.stock}
-          <button onclick="saveProductInfo('${p.barcode}','${n}','${m}','${c}')">保存</button>
-        `;
+
+        if (p.stock === 0) {
+          li.innerHTML = `🔴 <span class="out">在庫切れ</span> (${p.barcode})`;
+        } else {
+          li.textContent = `在庫: ${p.stock} (${p.barcode})`;
+        }
+
         list.appendChild(li);
       });
     }
@@ -167,7 +126,6 @@
         Quagga.stop();
         document.getElementById("result").textContent = "バーコード: " + currentBarcode;
         await ensureProduct(currentBarcode);
-        alert("数量を入力して仕入／販売を選んでください");
       });
     });
 
