@@ -27,10 +27,10 @@
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
 
-    // ⭐ グローバルに保持（重要）
+    // 現在のバーコード
     window.currentBarcode = null;
 
-    // 商品がなければ作る
+    // 商品がなければ作成
     async function ensureProduct(barcode) {
       const ref = doc(db, "products", barcode);
       const snap = await getDoc(ref);
@@ -45,25 +45,31 @@
       }
     }
 
-    // 在庫操作
+    // 在庫調整（数量対応）
     window.adjustStock = async function (type) {
       if (!window.currentBarcode) {
         alert("先にバーコードを読み取ってください");
         return;
       }
 
+      const qty = Number(document.getElementById("qty").value);
+      if (!qty || qty <= 0) {
+        alert("数量を正しく入力してください");
+        return;
+      }
+
       const ref = doc(db, "products", window.currentBarcode);
       const snap = await getDoc(ref);
-
       let stock = snap.data().stock;
 
-      if (type === "in") stock += 1;
-      if (type === "out") {
-        if (stock <= 0) {
-          alert("在庫が0です");
+      if (type === "in") {
+        stock += qty;
+      } else {
+        if (stock < qty) {
+          alert("在庫が足りません");
           return;
         }
-        stock -= 1;
+        stock -= qty;
       }
 
       await updateDoc(ref, {
@@ -71,6 +77,7 @@
         updatedAt: serverTimestamp()
       });
 
+      document.getElementById("qty").value = 1;
       loadProducts();
       alert(type === "in" ? "仕入しました" : "販売しました");
     };
@@ -112,6 +119,9 @@
   <div id="scanner" style="max-width:400px;"></div>
 
   <div style="margin-top:10px;">
+    数量:
+    <input id="qty" type="number" value="1" min="1" style="width:60px;">
+    <br><br>
     <button onclick="adjustStock('in')">📦 仕入</button>
     <button onclick="adjustStock('out')">🛒 販売</button>
   </div>
@@ -145,10 +155,8 @@
         window.currentBarcode = code;
         result.textContent = "バーコード: " + code;
 
-        // 商品を必ず存在させる
-        await window.ensureProduct?.(code);
-
-        alert("仕入か販売を選んでください");
+        await ensureProduct(code);
+        alert("数量を入力して仕入／販売を選んでください");
       });
     });
   </script>
