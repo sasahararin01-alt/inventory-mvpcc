@@ -122,7 +122,6 @@
       if(type==='in'){
         const price = Number(document.getElementById("modalPrice").value);
         const retail = Number(document.getElementById("modalRetail").value);
-        // 平均仕入価格更新
         averageCost = ((averageCost * stock) + (price * qty)) / (stock + qty);
         stock += qty;
         if(retail>0) retailPrice = retail;
@@ -167,7 +166,7 @@
     }
 
     async function saveInfo(barcode) {
-      const name = document.getElementById("name_" + barcode).value;
+      const name = document.getElementById("name_" + barcode).value || "未設定";
       const maker = document.getElementById("maker_" + barcode).value;
       const category = document.getElementById("category_" + barcode).value;
       const stock = Number(document.getElementById("stock_" + barcode).value);
@@ -195,7 +194,7 @@
 
         li.innerHTML=`
           商品名:<br>
-          <input id="name_${p.barcode}" value="${p.name || ""}" placeholder="商品名"><br>
+          <input id="name_${p.barcode}" value="${p.name || "未設定"}" placeholder="商品名"><br>
           メーカー:<br>
           <input id="maker_${p.barcode}" value="${p.manufacturer || ""}" placeholder="メーカー"><br>
           カテゴリ:<br>
@@ -203,8 +202,8 @@
           在庫:<br>
           <input id="stock_${p.barcode}" type="number" value="${p.stock}" min="0" ${p.stock===0?'class="out"':''}><br>
           上代:<br>
-          <input id="retail_${p.barcode}" type="number" value="${p.retailPrice}"><br>
-          平均仕入価格: ${p.averageCost.toFixed(2)}<br>
+          <input id="retail_${p.barcode}" type="number" value="${p.retailPrice || 0}"><br>
+          平均仕入価格: ${(p.averageCost || 0).toFixed(2)}<br>
           <button class="saveBtn" onclick="saveInfo('${p.barcode}')">保存</button>
           <button class="historyBtn" onclick="showHistory('${p.barcode}')">履歴表示</button>
           <div id="history_${p.barcode}" class="history"></div>
