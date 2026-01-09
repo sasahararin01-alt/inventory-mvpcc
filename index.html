@@ -3,7 +3,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>在庫管理アプリ（認証・重複防止）</title>
+  <title>在庫管理アプリ（認証・重複防止・手動バーコード対応）</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
   <style>
@@ -24,7 +24,7 @@
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 </head>
 <body>
-  <h1>在庫管理アプリ（認証・重複防止）</h1>
+  <h1>在庫管理アプリ（認証・重複防止・手動バーコード対応）</h1>
 
   <!-- ログイン画面 -->
   <div id="loginDiv">
@@ -42,10 +42,20 @@
   <div id="appDiv" class="hidden">
     <button onclick="logout()">ログアウト</button>
     <hr>
+
+    <!-- バーコードスキャン -->
     <button id="scanBtn">📷 バーコードを読み取る</button>
     <p id="result">未読み取り</p>
     <div id="scanner" style="max-width:400px;"></div>
 
+    <!-- 手動バーコード入力 -->
+    <hr>
+    <h3>手動バーコード登録 / 操作</h3>
+    <input id="manualBarcode" placeholder="バーコード番号を入力">
+    <button onclick="manualBarcodeSet()">登録 / 操作</button>
+
+    <!-- 手動在庫操作 -->
+    <hr>
     <div style="margin-top:10px;">
       数量:
       <input id="qty" type="number" value="1" min="1" style="width:60px;">
@@ -54,6 +64,7 @@
       <button onclick="manualAdjust('out')">🛒 手動販売</button>
     </div>
 
+    <!-- 絞り込み検索 -->
     <hr>
     <h3>絞り込み検索</h3>
     メーカー: <input id="filterMaker" placeholder="例: meiji">
@@ -139,6 +150,7 @@
       }
     }
 
+    // モーダル関連
     function openModal(barcode) {
       currentBarcode = barcode;
       document.getElementById("modalBarcode").textContent = "バーコード: " + barcode;
@@ -147,7 +159,6 @@
       document.getElementById("modalRetail").value = 0;
       document.getElementById("modal").style.display = "flex";
     }
-
     function closeModal() { document.getElementById("modal").style.display = "none"; }
 
     async function submitModal(type) {
@@ -183,7 +194,7 @@
     }
 
     async function manualAdjust(type){
-      if(!currentBarcode) return alert("先にバーコードを読み取ってください");
+      if(!currentBarcode) return alert("先にバーコードを読み取くか、手動入力してください");
       openModal(currentBarcode);
       if(type==='out') document.getElementById("purchaseFields").style.display='none';
       else document.getElementById("purchaseFields").style.display='block';
@@ -216,16 +227,16 @@
 
     async function loadProducts(){
       const list = document.getElementById("productList");
-      list.innerHTML=""; // ←重複防止のため必ず初期化
+      list.innerHTML=""; // 重複防止
       const snap = await db.collection("products").get();
-      const seenBarcodes = new Set(); // ←重複防止
+      const seenBarcodes = new Set();
 
       snap.forEach(doc=>{
         const p = doc.data();
         if((currentFilter.maker && p.manufacturer!==currentFilter.maker) ||
            (currentFilter.category && p.category!==currentFilter.category)) return;
 
-        if(seenBarcodes.has(p.barcode)) return; // ←重複回避
+        if(seenBarcodes.has(p.barcode)) return;
         seenBarcodes.add(p.barcode);
 
         const li = document.createElement("li");
@@ -275,6 +286,15 @@
       document.getElementById("filterCategory").value = "";
       currentFilter = { maker: "", category: "" };
       loadProducts();
+    }
+
+    // 手動バーコード入力
+    window.manualBarcodeSet = function(){
+      const code = document.getElementById("manualBarcode").value.trim();
+      if(!code) return alert("バーコードを入力してください");
+      currentBarcode = code;
+      document.getElementById("result").textContent = "手動バーコード: " + code;
+      ensureProduct(code).then(()=>loadProducts());
     }
 
     // バーコードスキャン
