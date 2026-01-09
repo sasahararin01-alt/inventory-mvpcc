@@ -5,7 +5,6 @@
   <title>在庫管理アプリ</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-  <!-- Firebase -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
     import {
@@ -28,7 +27,7 @@
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
 
-    // バーコード保存
+    // 保存（バーコード）
     window.saveProduct = async function (barcode) {
       const ref = doc(db, "products", barcode);
       const snap = await getDoc(ref);
@@ -40,8 +39,8 @@
         });
       } else {
         await setDoc(ref, {
-          barcode: barcode,
-          name: "未設定",
+          barcode,
+          name: "",
           stock: 1,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp()
@@ -50,16 +49,35 @@
       loadProducts();
     };
 
-    // 商品一覧表示
+    // 商品名保存
+    window.saveName = async function (barcode, inputId) {
+      const name = document.getElementById(inputId).value;
+      const ref = doc(db, "products", barcode);
+      await updateDoc(ref, {
+        name,
+        updatedAt: serverTimestamp()
+      });
+      alert("商品名を保存しました");
+    };
+
+    // 一覧表示
     async function loadProducts() {
       const list = document.getElementById("productList");
       list.innerHTML = "";
 
       const snap = await getDocs(collection(db, "products"));
-      snap.forEach(doc => {
-        const p = doc.data();
+      snap.forEach(d => {
+        const p = d.data();
         const li = document.createElement("li");
-        li.textContent = `${p.name}（在庫: ${p.stock}）`;
+
+        const inputId = "name_" + p.barcode;
+
+        li.innerHTML = `
+          <input id="${inputId}" value="${p.name || ""}" placeholder="商品名">
+          在庫: ${p.stock}
+          <button onclick="saveName('${p.barcode}', '${inputId}')">保存</button>
+        `;
+
         list.appendChild(li);
       });
     }
@@ -73,17 +91,14 @@
 
   <button id="scanBtn">📷 バーコードを読み取る</button>
   <p id="result">未読み取り</p>
-
-  <div id="scanner" style="width:100%; max-width:400px;"></div>
+  <div id="scanner" style="max-width:400px;"></div>
 
   <hr>
 
   <h2>商品一覧</h2>
   <ul id="productList"></ul>
 
-  <!-- バーコードライブラリ -->
   <script src="https://unpkg.com/quagga@0.12.1/dist/quagga.min.js"></script>
-
   <script>
     const scanBtn = document.getElementById("scanBtn");
     const result = document.getElementById("result");
@@ -97,10 +112,7 @@
         },
         decoder: { readers: ["ean_reader"] }
       }, err => {
-        if (err) {
-          alert("カメラ起動失敗");
-          return;
-        }
+        if (err) return alert("カメラ起動失敗");
         Quagga.start();
       });
 
@@ -108,9 +120,8 @@
         const code = data.codeResult.code;
         result.textContent = "バーコード: " + code;
         Quagga.stop();
-
         await window.saveProduct(code);
-        alert("Firestoreに保存しました");
+        alert("在庫を追加しました");
       });
     });
   </script>
