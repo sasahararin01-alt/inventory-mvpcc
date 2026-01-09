@@ -14,6 +14,8 @@
       getDoc,
       setDoc,
       updateDoc,
+      collection,
+      getDocs,
       serverTimestamp
     } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
 
@@ -26,39 +28,43 @@
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
 
-    window.currentBarcode = null;
-
-    // 在庫増減
-    window.updateStock = async function (type, qty) {
-      const ref = doc(db, "products", window.currentBarcode);
-      const snap = await getDoc(ref);
-
-      if (!snap.exists()) return;
-
-      const current = snap.data().stock || 0;
-      const diff = type === "in" ? qty : -qty;
-
-      await updateDoc(ref, {
-        stock: current + diff,
-        updatedAt: serverTimestamp()
-      });
-    };
-
-    // 商品初期保存
-    window.ensureProduct = async function (barcode) {
+    // バーコード保存
+    window.saveProduct = async function (barcode) {
       const ref = doc(db, "products", barcode);
       const snap = await getDoc(ref);
 
-      if (!snap.exists()) {
+      if (snap.exists()) {
+        await updateDoc(ref, {
+          stock: snap.data().stock + 1,
+          updatedAt: serverTimestamp()
+        });
+      } else {
         await setDoc(ref, {
           barcode: barcode,
           name: "未設定",
-          stock: 0,
+          stock: 1,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp()
         });
       }
+      loadProducts();
     };
+
+    // 商品一覧表示
+    async function loadProducts() {
+      const list = document.getElementById("productList");
+      list.innerHTML = "";
+
+      const snap = await getDocs(collection(db, "products"));
+      snap.forEach(doc => {
+        const p = doc.data();
+        const li = document.createElement("li");
+        li.textContent = `${p.name}（在庫: ${p.stock}）`;
+        list.appendChild(li);
+      });
+    }
+
+    window.addEventListener("load", loadProducts);
   </script>
 </head>
 
@@ -69,56 +75,18 @@
   <p id="result">未読み取り</p>
 
   <div id="scanner" style="width:100%; max-width:400px;"></div>
-<hr>
 
-<h2>商品一覧</h2>
-<ul id="productList"></ul>
+  <hr>
 
-  <div style="margin-top:16px;">
-    <label>
-      数量：
-      <input id="qtyInput" type="number" value="1" min="1">
-    </label>
-  </div>
+  <h2>商品一覧</h2>
+  <ul id="productList"></ul>
 
-  <div style="margin-top:8px;">
-    <button onclick="updateStock('in', Number(qtyInput.value))">仕入</button>
-    <button onclick="updateStock('out', Number(qtyInput.value))">販売</button>
-  </div>
-
-  <!-- Quagga -->
+  <!-- バーコードライブラリ -->
   <script src="https://unpkg.com/quagga@0.12.1/dist/quagga.min.js"></script>
 
   <script>
-    <script type="module">
-  import {
-    getFirestore,
-    collection,
-    getDocs
-  } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
-
-  const app = window.firebaseApp;
-  const db = getFirestore(app);
-
-  const listEl = document.getElementById("productList");
-
-  async function loadProducts() {
-    listEl.innerHTML = "";
-    const snap = await getDocs(collection(db, "products"));
-
-    snap.forEach(doc => {
-      const p = doc.data();
-      const li = document.createElement("li");
-      li.textContent = `${p.name} / 在庫: ${p.stock}`;
-      listEl.appendChild(li);
-    });
-  }
-
-  loadProducts();
-</script>
-const scanBtn = document.getElementById("scanBtn");
+    const scanBtn = document.getElementById("scanBtn");
     const result = document.getElementById("result");
-    const qtyInput = document.getElementById("qtyInput");
 
     scanBtn.addEventListener("click", () => {
       Quagga.init({
@@ -130,7 +98,7 @@ const scanBtn = document.getElementById("scanBtn");
         decoder: { readers: ["ean_reader"] }
       }, err => {
         if (err) {
-          alert("カメラ起動失敗: " + err);
+          alert("カメラ起動失敗");
           return;
         }
         Quagga.start();
@@ -138,16 +106,11 @@ const scanBtn = document.getElementById("scanBtn");
 
       Quagga.onDetected(async data => {
         const code = data.codeResult.code;
-
-        window.currentBarcode = code;
         result.textContent = "バーコード: " + code;
         Quagga.stop();
 
-        try {
-          await window.ensureProduct(code);
-        } catch (e) {
-          alert("初期化エラー: " + e.message);
-        }
+        await window.saveProduct(code);
+        alert("Firestoreに保存しました");
       });
     });
   </script>
