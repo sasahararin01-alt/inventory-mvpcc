@@ -3,7 +3,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>在庫管理アプリ 完全版（認証付き）</title>
+  <title>在庫管理アプリ 完全版（認証付き・重複防止）</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
   <style>
@@ -24,7 +24,7 @@
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 </head>
 <body>
-  <h1>在庫管理アプリ（認証付き）</h1>
+  <h1>在庫管理アプリ（認証付き・重複防止）</h1>
 
   <!-- ログイン画面 -->
   <div id="loginDiv">
@@ -146,152 +146,4 @@
       document.getElementById("modal").style.display = "flex";
     }
 
-    function closeModal() { document.getElementById("modal").style.display = "none"; }
-
-    async function submitModal(type) {
-      const qty = Number(document.getElementById("modalQty").value);
-      const ref = db.collection("products").doc(currentBarcode);
-      const snap = await ref.get();
-      let stock = snap.data().stock;
-      let averageCost = snap.data().averageCost || 0;
-      let retailPrice = snap.data().retailPrice || 0;
-
-      if(type==='in'){
-        const price = Number(document.getElementById("modalPrice").value);
-        const retail = Number(document.getElementById("modalRetail").value);
-        averageCost = ((averageCost * stock) + (price * qty)) / (stock + qty);
-        stock += qty;
-        if(retail>0) retailPrice = retail;
-        await ref.collection("history").add({
-          type:'in', quantity: qty, price: price,
-          date: firebase.firestore.FieldValue.serverTimestamp()
-        });
-      } else {
-        if(stock<qty) return alert("在庫が足りません");
-        stock -= qty;
-        await ref.collection("history").add({
-          type:'out', quantity: qty,
-          date: firebase.firestore.FieldValue.serverTimestamp()
-        });
-      }
-
-      await ref.update({ stock, averageCost, retailPrice, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
-      closeModal();
-      loadProducts();
-    }
-
-    async function manualAdjust(type){
-      if(!currentBarcode) return alert("先にバーコードを読み取ってください");
-      openModal(currentBarcode);
-      if(type==='out') document.getElementById("purchaseFields").style.display='none';
-      else document.getElementById("purchaseFields").style.display='block';
-    }
-
-    async function saveInfo(barcode) {
-      const name = document.getElementById("name_" + barcode).value || "未設定";
-      const maker = document.getElementById("maker_" + barcode).value;
-      const category = document.getElementById("category_" + barcode).value;
-      const stock = Number(document.getElementById("stock_" + barcode).value);
-      const retail = Number(document.getElementById("retail_" + barcode).value);
-
-      await db.collection("products").doc(barcode).update({
-        name, manufacturer: maker, category, stock, retailPrice: retail,
-        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-      });
-      alert("保存しました");
-      loadProducts();
-    }
-
-    async function deleteProduct(barcode){
-      if(!confirm("本当に削除しますか？履歴も全て消えます")) return;
-      const historySnap = await db.collection("products").doc(barcode).collection("history").get();
-      const batch = db.batch();
-      historySnap.forEach(doc => batch.delete(doc.ref));
-      batch.delete(db.collection("products").doc(barcode));
-      await batch.commit();
-      loadProducts();
-    }
-
-    async function loadProducts(){
-      const list = document.getElementById("productList");
-      list.innerHTML="";
-      const snap = await db.collection("products").get();
-      snap.forEach(doc=>{
-        const p = doc.data();
-        if((currentFilter.maker && p.manufacturer!==currentFilter.maker) ||
-           (currentFilter.category && p.category!==currentFilter.category)) return;
-
-        const li = document.createElement("li");
-        li.className="product";
-
-        li.innerHTML=`
-          商品名:<br>
-          <input id="name_${p.barcode}" value="${p.name || "未設定"}" placeholder="商品名"><br>
-          メーカー:<br>
-          <input id="maker_${p.barcode}" value="${p.manufacturer || ""}" placeholder="メーカー"><br>
-          カテゴリ:<br>
-          <input id="category_${p.barcode}" value="${p.category || ""}" placeholder="カテゴリ"><br>
-          在庫:<br>
-          <input id="stock_${p.barcode}" type="number" value="${p.stock}" min="0" ${p.stock===0?'class="out"':''}><br>
-          上代:<br>
-          <input id="retail_${p.barcode}" type="number" value="${p.retailPrice || 0}"><br>
-          平均仕入価格: ${(p.averageCost || 0).toFixed(2)}<br>
-          <button class="saveBtn" onclick="saveInfo('${p.barcode}')">保存</button>
-          <button class="historyBtn" onclick="showHistory('${p.barcode}')">履歴表示</button>
-          <button class="deleteBtn" onclick="deleteProduct('${p.barcode}')">削除</button>
-          <div id="history_${p.barcode}" class="history"></div>
-        `;
-        list.appendChild(li);
-      });
-    }
-
-    async function showHistory(barcode){
-      const div = document.getElementById("history_"+barcode);
-      div.innerHTML="読み込み中...";
-      const snap = await db.collection("products").doc(barcode).collection("history").orderBy("date","desc").get();
-      if(snap.empty){ div.innerHTML="履歴なし"; return; }
-      div.innerHTML="";
-      snap.forEach(d=>{
-        const h=d.data();
-        const date=h.date ? h.date.toDate().toLocaleString() : "";
-        if(h.type==='in') div.innerHTML+=`仕入 ${h.quantity}個 @${h.price}円 (${date})<br>`;
-        else div.innerHTML+=`販売 ${h.quantity}個 (${date})<br>`;
-      });
-    }
-
-    function applyFilter() {
-      currentFilter.maker = document.getElementById("filterMaker").value.trim();
-      currentFilter.category = document.getElementById("filterCategory").value.trim();
-      loadProducts();
-    }
-    function clearFilter() {
-      document.getElementById("filterMaker").value = "";
-      document.getElementById("filterCategory").value = "";
-      currentFilter = { maker: "", category: "" };
-      loadProducts();
-    }
-
-    // バーコードスキャン
-    document.getElementById("scanBtn").addEventListener("click",()=>{
-      Quagga.init({
-        inputStream:{type:"LiveStream",target:document.querySelector("#scanner"),constraints:{facingMode:"environment"}},
-        decoder:{readers:["ean_reader"]}
-      }, err=>{if(err)return alert("カメラ起動失敗"); Quagga.start();});
-
-      Quagga.onDetected(async data=>{
-        currentBarcode = data.codeResult.code;
-        Quagga.stop();
-        document.getElementById("result").textContent="バーコード: "+currentBarcode;
-        await ensureProduct(currentBarcode);
-        loadProducts();
-      });
-    });
-
-    // 認証状態監視
-    auth.onAuthStateChanged(user=>{
-      if(user){ document.getElementById("loginDiv").classList.add("hidden"); document.getElementById("appDiv").classList.remove("hidden"); loadProducts(); }
-      else { document.getElementById("loginDiv").classList.remove("hidden"); document.getElementById("appDiv").classList.add("hidden"); }
-    });
-  </script>
-</body>
-</html>
+    function closeModal() { document.get
