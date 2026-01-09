@@ -90,7 +90,33 @@
   <script src="https://unpkg.com/quagga@0.12.1/dist/quagga.min.js"></script>
 
   <script>
-    const scanBtn = document.getElementById("scanBtn");
+    <script type="module">
+  import {
+    getFirestore,
+    collection,
+    getDocs
+  } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
+
+  const app = window.firebaseApp;
+  const db = getFirestore(app);
+
+  const listEl = document.getElementById("productList");
+
+  async function loadProducts() {
+    listEl.innerHTML = "";
+    const snap = await getDocs(collection(db, "products"));
+
+    snap.forEach(doc => {
+      const p = doc.data();
+      const li = document.createElement("li");
+      li.textContent = `${p.name} / 在庫: ${p.stock}`;
+      listEl.appendChild(li);
+    });
+  }
+
+  loadProducts();
+</script>
+const scanBtn = document.getElementById("scanBtn");
     const result = document.getElementById("result");
     const qtyInput = document.getElementById("qtyInput");
 
