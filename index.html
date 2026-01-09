@@ -27,40 +27,43 @@
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
 
-    // 保存（バーコード）
-    window.saveProduct = async function (barcode) {
-      const ref = doc(db, "products", barcode);
+    let lastBarcode = null;
+
+    // 在庫操作
+    window.adjustStock = async function (type) {
+      if (!lastBarcode) return alert("先にバーコードを読み取ってください");
+
+      const ref = doc(db, "products", lastBarcode);
       const snap = await getDoc(ref);
 
-      if (snap.exists()) {
-        await updateDoc(ref, {
-          stock: snap.data().stock + 1,
-          updatedAt: serverTimestamp()
-        });
-      } else {
-        await setDoc(ref, {
-          barcode,
-          name: "",
-          stock: 1,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp()
-        });
+      if (!snap.exists()) return alert("商品が存在しません");
+
+      let stock = snap.data().stock;
+
+      if (type === "in") stock += 1;
+      if (type === "out") {
+        if (stock <= 0) return alert("在庫が0です");
+        stock -= 1;
       }
+
+      await updateDoc(ref, {
+        stock,
+        updatedAt: serverTimestamp()
+      });
+
       loadProducts();
+      alert(type === "in" ? "仕入しました" : "販売しました");
     };
 
     // 商品名保存
     window.saveName = async function (barcode, inputId) {
       const name = document.getElementById(inputId).value;
       const ref = doc(db, "products", barcode);
-      await updateDoc(ref, {
-        name,
-        updatedAt: serverTimestamp()
-      });
+      await updateDoc(ref, { name });
       alert("商品名を保存しました");
     };
 
-    // 一覧表示
+    // 商品一覧
     async function loadProducts() {
       const list = document.getElementById("productList");
       list.innerHTML = "";
@@ -69,7 +72,6 @@
       snap.forEach(d => {
         const p = d.data();
         const li = document.createElement("li");
-
         const inputId = "name_" + p.barcode;
 
         li.innerHTML = `
@@ -77,7 +79,6 @@
           在庫: ${p.stock}
           <button onclick="saveName('${p.barcode}', '${inputId}')">保存</button>
         `;
-
         list.appendChild(li);
       });
     }
@@ -92,6 +93,11 @@
   <button id="scanBtn">📷 バーコードを読み取る</button>
   <p id="result">未読み取り</p>
   <div id="scanner" style="max-width:400px;"></div>
+
+  <div style="margin-top:10px;">
+    <button onclick="adjustStock('in')">📦 仕入</button>
+    <button onclick="adjustStock('out')">🛒 販売</button>
+  </div>
 
   <hr>
 
@@ -116,12 +122,11 @@
         Quagga.start();
       });
 
-      Quagga.onDetected(async data => {
-        const code = data.codeResult.code;
-        result.textContent = "バーコード: " + code;
+      Quagga.onDetected(data => {
+        lastBarcode = data.codeResult.code;
+        result.textContent = "バーコード: " + lastBarcode;
         Quagga.stop();
-        await window.saveProduct(code);
-        alert("在庫を追加しました");
+        alert("操作を選んでください（仕入 or 販売）");
       });
     });
   </script>
