@@ -10,7 +10,7 @@
     .out { color: red; font-weight: bold; }
     .product { border-bottom: 1px solid #ccc; padding: 10px 0; margin-bottom: 10px; }
     input { width: 90%; margin-bottom: 4px; }
-    button.saveBtn, button.historyBtn { margin-top: 4px; margin-bottom: 4px; }
+    button.saveBtn, button.historyBtn, button.deleteBtn { margin-top: 4px; margin-bottom: 4px; }
     .history { font-size: 0.9em; margin-left: 10px; }
     .modal { display:none; position: fixed; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,0.5); justify-content:center; align-items:center; }
     .modalContent { background:#fff; padding:20px; border-radius:5px; width:90%; max-width:400px; }
@@ -180,6 +180,18 @@
       loadProducts();
     }
 
+    async function deleteProduct(barcode){
+      if(!confirm("本当に削除しますか？履歴も全て消えます")) return;
+
+      // 履歴削除 + 商品削除
+      const historySnap = await db.collection("products").doc(barcode).collection("history").get();
+      const batch = db.batch();
+      historySnap.forEach(doc => batch.delete(doc.ref));
+      batch.delete(db.collection("products").doc(barcode));
+      await batch.commit();
+      loadProducts();
+    }
+
     async function loadProducts(){
       const list = document.getElementById("productList");
       list.innerHTML="";
@@ -206,6 +218,7 @@
           平均仕入価格: ${(p.averageCost || 0).toFixed(2)}<br>
           <button class="saveBtn" onclick="saveInfo('${p.barcode}')">保存</button>
           <button class="historyBtn" onclick="showHistory('${p.barcode}')">履歴表示</button>
+          <button class="deleteBtn" onclick="deleteProduct('${p.barcode}')">削除</button>
           <div id="history_${p.barcode}" class="history"></div>
         `;
         list.appendChild(li);
