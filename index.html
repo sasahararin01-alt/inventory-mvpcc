@@ -3,7 +3,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>在庫管理アプリ（CSV出力対応）</title>
+  <title>在庫管理アプリ（CSV出力・iPhone重複対応）</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
   <style>
@@ -232,18 +232,19 @@
 
     async function loadProducts(){
       const list = document.getElementById("productList");
-      list.innerHTML="";
-      const snap = await db.collection("products").get();
-      const seenBarcodes = new Set();
-
+      list.innerHTML=""; // まず完全クリア
+      const snap = await db.collection("products").orderBy("barcode").get();
+      const products = [];
       snap.forEach(doc=>{
         const p = doc.data();
         if((currentFilter.maker && p.manufacturer!==currentFilter.maker) ||
            (currentFilter.category && p.category!==currentFilter.category)) return;
 
-        if(seenBarcodes.has(p.barcode)) return;
-        seenBarcodes.add(p.barcode);
+        if(products.find(prod=>prod.barcode===p.barcode)) return;
+        products.push(p);
+      });
 
+      products.forEach(p=>{
         const li = document.createElement("li");
         li.className="product";
         li.innerHTML=`
@@ -295,9 +296,8 @@
       loadProducts();
     }
 
-    // CSV出力
     async function exportCSV(){
-      const snap = await db.collection("products").get();
+      const snap = await db.collection("products").orderBy("barcode").get();
       let csv = "バーコード,商品名,メーカー,カテゴリ,在庫,平均仕入価格,最新仕入価格,上代\n";
       snap.forEach(doc=>{
         const p = doc.data();
@@ -312,7 +312,6 @@
       URL.revokeObjectURL(url);
     }
 
-    // 手動バーコード入力
     window.manualBarcodeSet = function(){
       const code = document.getElementById("manualBarcode").value.trim();
       if(!code) return alert("バーコードを入力してください");
@@ -321,7 +320,6 @@
       ensureProduct(code).then(()=>loadProducts());
     }
 
-    // バーコードスキャン
     document.getElementById("scanBtn").addEventListener("click",()=>{
       Quagga.init({
         inputStream:{type:"LiveStream",target:document.querySelector("#scanner"),constraints:{facingMode:"environment"}},
