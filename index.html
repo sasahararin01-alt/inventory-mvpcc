@@ -3,7 +3,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>在庫管理アプリ（完全版・仕入金額編集対応）</title>
+  <title>在庫管理アプリ（CSV出力対応）</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
   <style>
@@ -24,7 +24,7 @@
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 </head>
 <body>
-  <h1>在庫管理アプリ（完全版・仕入金額編集対応）</h1>
+  <h1>在庫管理アプリ（CSV出力対応）</h1>
 
   <!-- ログイン画面 -->
   <div id="loginDiv">
@@ -72,6 +72,10 @@
     <button onclick="applyFilter()">適用</button>
     <button onclick="clearFilter()">解除</button>
 
+    <!-- CSV出力ボタン -->
+    <hr>
+    <button onclick="exportCSV()">📄 CSV出力</button>
+
     <hr>
     <h2>商品一覧</h2>
     <ul id="productList"></ul>
@@ -99,7 +103,6 @@
   <script src="https://unpkg.com/quagga@0.12.1/dist/quagga.min.js"></script>
 
   <script>
-    // Firebase 初期化
     const firebaseConfig = {
       apiKey: "AIzaSyCaFkgFPGtYN0GJdo-20mRHJqLLOfsaAFI",
       authDomain: "inventory-mvpcc.firebaseapp.com",
@@ -112,7 +115,7 @@
     let currentBarcode = null;
     let currentFilter = { maker: "", category: "" };
 
-    // 認証関数
+    // 認証
     window.login = function() {
       const email = document.getElementById("email").value;
       const password = document.getElementById("password").value;
@@ -131,7 +134,6 @@
 
     window.logout = function() { auth.signOut(); location.reload(); }
 
-    // Firestore 連動関数
     async function ensureProduct(barcode) {
       const ref = db.collection("products").doc(barcode);
       const snap = await ref.get();
@@ -151,7 +153,6 @@
       }
     }
 
-    // モーダル関連
     function openModal(barcode) {
       currentBarcode = barcode;
       document.getElementById("modalBarcode").textContent = "バーコード: " + barcode;
@@ -199,8 +200,7 @@
     async function manualAdjust(type){
       if(!currentBarcode) return alert("先にバーコードを読み取くか、手動入力してください");
       openModal(currentBarcode);
-      if(type==='out') document.getElementById("purchaseFields").style.display='none';
-      else document.getElementById("purchaseFields").style.display='block';
+      document.getElementById("purchaseFields").style.display = type==='out' ? 'none' : 'block';
     }
 
     async function saveInfo(barcode) {
@@ -295,6 +295,23 @@
       loadProducts();
     }
 
+    // CSV出力
+    async function exportCSV(){
+      const snap = await db.collection("products").get();
+      let csv = "バーコード,商品名,メーカー,カテゴリ,在庫,平均仕入価格,最新仕入価格,上代\n";
+      snap.forEach(doc=>{
+        const p = doc.data();
+        csv += `"${p.barcode}","${p.name}","${p.manufacturer}","${p.category}",${p.stock},${(p.averageCost||0).toFixed(2)},${p.latestPrice||0},${p.retailPrice||0}\n`;
+      });
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'inventory.csv';
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
     // 手動バーコード入力
     window.manualBarcodeSet = function(){
       const code = document.getElementById("manualBarcode").value.trim();
@@ -320,7 +337,6 @@
       });
     });
 
-    // 認証状態監視
     auth.onAuthStateChanged(user=>{
       if(user){ document.getElementById("loginDiv").classList.add("hidden"); document.getElementById("appDiv").classList.remove("hidden"); loadProducts(); }
       else { document.getElementById("loginDiv").classList.remove("hidden"); document.getElementById("appDiv").classList.add("hidden"); }
