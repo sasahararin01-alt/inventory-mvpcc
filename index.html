@@ -3,14 +3,17 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>在庫管理アプリ</title>
+  <title>在庫管理アプリ 完全版</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
   <style>
     .out { color: red; font-weight: bold; }
-    .product { border-bottom: 1px solid #ccc; padding: 10px 0; }
+    .product { border-bottom: 1px solid #ccc; padding: 10px 0; margin-bottom: 10px; }
     input { width: 90%; margin-bottom: 4px; }
-    button.saveBtn { margin-top: 4px; margin-bottom: 4px; }
+    button.saveBtn, button.historyBtn { margin-top: 4px; margin-bottom: 4px; }
+    .history { font-size: 0.9em; margin-left: 10px; }
+    .modal { display:none; position: fixed; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,0.5); justify-content:center; align-items:center; }
+    .modalContent { background:#fff; padding:20px; border-radius:5px; width:90%; max-width:400px; }
   </style>
 
   <!-- Firebase -->
@@ -19,7 +22,7 @@
 </head>
 
 <body>
-  <h1>在庫管理アプリ</h1>
+  <h1>在庫管理アプリ 完全版</h1>
 
   <button id="scanBtn">📷 バーコードを読み取る</button>
   <p id="result">未読み取り</p>
@@ -29,8 +32,8 @@
     数量:
     <input id="qty" type="number" value="1" min="1" style="width:60px;">
     <br><br>
-    <button onclick="adjustStock('in')">📦 仕入</button>
-    <button onclick="adjustStock('out')">🛒 販売</button>
+    <button onclick="manualAdjust('in')">📦 手動仕入</button>
+    <button onclick="manualAdjust('out')">🛒 手動販売</button>
   </div>
 
   <hr>
@@ -44,6 +47,25 @@
   <h2>商品一覧</h2>
   <ul id="productList"></ul>
 
+  <!-- モーダル -->
+  <div id="modal" class="modal">
+    <div class="modalContent">
+      <h3>仕入/販売登録</h3>
+      <p id="modalBarcode"></p>
+      <label>数量:</label>
+      <input id="modalQty" type="number" value="1" min="1"><br>
+      <div id="purchaseFields">
+        <label>仕入価格:</label>
+        <input id="modalPrice" type="number" value="0"><br>
+        <label>上代:</label>
+        <input id="modalRetail" type="number" value="0"><br>
+      </div>
+      <button onclick="submitModal('in')">仕入登録</button>
+      <button onclick="submitModal('out')">販売登録</button>
+      <button onclick="closeModal()">キャンセル</button>
+    </div>
+  </div>
+
   <script src="https://unpkg.com/quagga@0.12.1/dist/quagga.min.js"></script>
 
   <script>
@@ -52,7 +74,6 @@
       authDomain: "inventory-mvpcc.firebaseapp.com",
       projectId: "inventory-mvpcc"
     };
-
     firebase.initializeApp(firebaseConfig);
     const db = firebase.firestore();
 
@@ -69,46 +90,60 @@
           manufacturer: "",
           category: "",
           stock: 0,
+          averageCost: 0,
+          retailPrice: 0,
           createdAt: firebase.firestore.FieldValue.serverTimestamp(),
           updatedAt: firebase.firestore.FieldValue.serverTimestamp()
         });
       }
     }
 
-    async function adjustStock(type) {
-      if (!currentBarcode) return alert("先にバーコードを読み取ってください");
-      const qty = Number(document.getElementById("qty").value);
-      if (qty <= 0) return alert("数量を正しく入力してください");
+    function openModal(barcode) {
+      currentBarcode = barcode;
+      document.getElementById("modalBarcode").textContent = "バーコード: " + barcode;
+      document.getElementById("modalQty").value = 1;
+      document.getElementById("modalPrice").value = 0;
+      document.getElementById("modalRetail").value = 0;
+      document.getElementById("modal").style.display = "flex";
+    }
 
+    function closeModal() {
+      document.getElementById("modal").style.display = "none";
+    }
+
+    async function submitModal(type) {
+      const qty = Number(document.getElementById("modalQty").value);
       const ref = db.collection("products").doc(currentBarcode);
       const snap = await ref.get();
       let stock = snap.data().stock;
+      let averageCost = snap.data().averageCost || 0;
+      let retailPrice = snap.data().retailPrice || 0;
 
-      if (type === "in") stock += qty;
-      else {
-        if (stock < qty) return alert("在庫が足りません");
+      if(type==='in'){
+        const price = Number(document.getElementById("modalPrice").value);
+        const retail = Number(document.getElementById("modalRetail").value);
+        // 平均仕入価格更新
+        averageCost = ((averageCost * stock) + (price * qty)) / (stock + qty);
+        stock += qty;
+        if(retail>0) retailPrice = retail;
+        await ref.collection("history").add({
+          type:'in',
+          quantity: qty,
+          price: price,
+          date: firebase.firestore.FieldValue.serverTimestamp()
+        });
+      } else {
+        if(stock<qty) return alert("在庫が足りません");
         stock -= qty;
+        await ref.collection("history").add({
+          type:'out',
+          quantity: qty,
+          date: firebase.firestore.FieldValue.serverTimestamp()
+        });
       }
 
-      await ref.update({ stock, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
-      loadProducts();
-    }
-
-    async function saveInfo(barcode) {
-      const name = document.getElementById("name_" + barcode).value;
-      const maker = document.getElementById("maker_" + barcode).value;
-      const category = document.getElementById("category_" + barcode).value;
-      const stock = Number(document.getElementById("stock_" + barcode).value);
-
-      await db.collection("products").doc(barcode).update({
-        name,
-        manufacturer: maker,
-        category,
-        stock,
-        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-      });
-
-      alert("保存しました");
+      await ref.update({ stock, averageCost, retailPrice, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+      closeModal();
       loadProducts();
     }
 
@@ -117,7 +152,6 @@
       currentFilter.category = document.getElementById("filterCategory").value.trim();
       loadProducts();
     }
-
     function clearFilter() {
       document.getElementById("filterMaker").value = "";
       document.getElementById("filterCategory").value = "";
@@ -125,22 +159,41 @@
       loadProducts();
     }
 
-    async function loadProducts() {
+    async function manualAdjust(type){
+      if(!currentBarcode) return alert("先にバーコードを読み取ってください");
+      openModal(currentBarcode);
+      if(type==='out') document.getElementById("purchaseFields").style.display='none';
+      else document.getElementById("purchaseFields").style.display='block';
+    }
+
+    async function saveInfo(barcode) {
+      const name = document.getElementById("name_" + barcode).value;
+      const maker = document.getElementById("maker_" + barcode).value;
+      const category = document.getElementById("category_" + barcode).value;
+      const stock = Number(document.getElementById("stock_" + barcode).value);
+      const retail = Number(document.getElementById("retail_" + barcode).value);
+
+      await db.collection("products").doc(barcode).update({
+        name, manufacturer: maker, category, stock, retailPrice: retail,
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      alert("保存しました");
+      loadProducts();
+    }
+
+    async function loadProducts(){
       const list = document.getElementById("productList");
-      list.innerHTML = "";
+      list.innerHTML="";
       const snap = await db.collection("products").get();
-
-      snap.forEach(doc => {
+      snap.forEach(doc=>{
         const p = doc.data();
-
-        // フィルター
-        if ((currentFilter.maker && p.manufacturer !== currentFilter.maker) ||
-            (currentFilter.category && p.category !== currentFilter.category)) return;
+        if((currentFilter.maker && p.manufacturer!==currentFilter.maker) ||
+           (currentFilter.category && p.category!==currentFilter.category)) return;
 
         const li = document.createElement("li");
-        li.className = "product";
+        li.className="product";
 
-        li.innerHTML = `
+        li.innerHTML=`
           商品名:<br>
           <input id="name_${p.barcode}" value="${p.name || ""}" placeholder="商品名"><br>
           メーカー:<br>
@@ -148,30 +201,43 @@
           カテゴリ:<br>
           <input id="category_${p.barcode}" value="${p.category || ""}" placeholder="カテゴリ"><br>
           在庫:<br>
-          <input id="stock_${p.barcode}" type="number" value="${p.stock}" min="0"><br>
+          <input id="stock_${p.barcode}" type="number" value="${p.stock}" min="0" ${p.stock===0?'class="out"':''}><br>
+          上代:<br>
+          <input id="retail_${p.barcode}" type="number" value="${p.retailPrice}"><br>
+          平均仕入価格: ${p.averageCost.toFixed(2)}<br>
           <button class="saveBtn" onclick="saveInfo('${p.barcode}')">保存</button>
+          <button class="historyBtn" onclick="showHistory('${p.barcode}')">履歴表示</button>
+          <div id="history_${p.barcode}" class="history"></div>
         `;
-
-        // 在庫0なら赤文字
-        if (p.stock === 0) {
-          li.querySelector("#stock_" + p.barcode).classList.add("out");
-        }
-
         list.appendChild(li);
       });
     }
 
-    // バーコードスキャン
-    document.getElementById("scanBtn").addEventListener("click", () => {
-      Quagga.init({
-        inputStream: { type: "LiveStream", target: document.querySelector("#scanner"), constraints: { facingMode: "environment" } },
-        decoder: { readers: ["ean_reader"] }
-      }, err => { if(err) return alert("カメラ起動失敗"); Quagga.start(); });
+    async function showHistory(barcode){
+      const div = document.getElementById("history_"+barcode);
+      div.innerHTML="読み込み中...";
+      const snap = await db.collection("products").doc(barcode).collection("history").orderBy("date","desc").get();
+      if(snap.empty){ div.innerHTML="履歴なし"; return; }
+      div.innerHTML="";
+      snap.forEach(d=>{
+        const h=d.data();
+        const date=h.date ? h.date.toDate().toLocaleString() : "";
+        if(h.type==='in') div.innerHTML+=`仕入 ${h.quantity}個 @${h.price}円 (${date})<br>`;
+        else div.innerHTML+=`販売 ${h.quantity}個 (${date})<br>`;
+      });
+    }
 
-      Quagga.onDetected(async data => {
+    // バーコードスキャン
+    document.getElementById("scanBtn").addEventListener("click",()=>{
+      Quagga.init({
+        inputStream:{type:"LiveStream",target:document.querySelector("#scanner"),constraints:{facingMode:"environment"}},
+        decoder:{readers:["ean_reader"]}
+      }, err=>{if(err)return alert("カメラ起動失敗"); Quagga.start();});
+
+      Quagga.onDetected(async data=>{
         currentBarcode = data.codeResult.code;
         Quagga.stop();
-        document.getElementById("result").textContent = "バーコード: " + currentBarcode;
+        document.getElementById("result").textContent="バーコード: "+currentBarcode;
         await ensureProduct(currentBarcode);
         loadProducts();
       });
