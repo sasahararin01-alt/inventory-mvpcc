@@ -3,7 +3,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>在庫管理アプリ（完全版・並び替え対応）</title>
+<title>在庫管理アプリ（完全版）</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <style>
@@ -11,8 +11,9 @@ body { font-family:sans-serif; padding:10px; }
 .hidden { display:none; }
 .product { border-bottom:1px solid #ccc; padding:10px 0; }
 .out { color:red; font-weight:bold; }
-input, select { width:95%; margin-bottom:6px; }
+input, select { width:100%; margin-bottom:6px; }
 button { margin:4px 0; }
+.flex { display:flex; gap:6px; align-items:center; }
 .modal {
   display:none; position:fixed; inset:0;
   background:rgba(0,0,0,0.6);
@@ -22,8 +23,6 @@ button { margin:4px 0; }
   background:#fff; padding:15px;
   border-radius:6px; width:95%; max-width:420px;
 }
-.row { display:flex; gap:4px; align-items:center; }
-.row select { flex:1; }
 .small { font-size:0.85em; color:#555; }
 </style>
 
@@ -37,8 +36,8 @@ button { margin:4px 0; }
 
 <!-- ログイン -->
 <div id="loginDiv">
-  <input id="email" type="email" placeholder="メール"><br>
-  <input id="password" type="password" placeholder="パスワード"><br>
+  <input id="email" placeholder="メール">
+  <input id="password" type="password" placeholder="パスワード">
   <button onclick="login()">ログイン</button>
   <button onclick="signup()">新規登録</button>
   <p id="loginMsg" style="color:red;"></p>
@@ -51,7 +50,7 @@ button { margin:4px 0; }
 <hr>
 <button id="scanBtn">📷 バーコードを読む</button>
 <p id="result">未読み取り</p>
-<div id="scanner" style="max-width:400px;"></div>
+<div id="scanner"></div>
 
 <hr>
 <h3>手動バーコード</h3>
@@ -59,16 +58,33 @@ button { margin:4px 0; }
 <button onclick="manualBarcodeSet()">開く</button>
 
 <hr>
-<h3>並び替え</h3>
-<select id="sortSelect" onchange="loadProducts()">
-  <option value="">並び替えなし</option>
-  <option value="priceAsc">仕入れ価格：安い順</option>
-  <option value="priceDesc">仕入れ価格：高い順</option>
-  <option value="categoryAsc">カテゴリ：あいうえお順</option>
-</select>
+<h3>🔍 絞り込み検索</h3>
+<input id="fName" placeholder="商品名">
+<input id="fBarcode" placeholder="バーコード">
+<select id="fMaker"></select>
+<select id="fCategory"></select>
+<button onclick="applyFilter()">検索</button>
+<button onclick="clearFilter()">解除</button>
 
 <hr>
-<h2>商品一覧</h2>
+<div class="flex">
+<h2 style="flex:1;">商品一覧</h2>
+<select id="sortKey">
+  <option value="">並び替えなし</option>
+  <option value="name">商品名</option>
+  <option value="category">カテゴリ</option>
+  <option value="manufacturer">メーカー</option>
+  <option value="stock">在庫数</option>
+  <option value="latestPrice">仕入れ価格</option>
+  <option value="retailPrice">販売価格</option>
+</select>
+<select id="sortOrder">
+  <option value="asc">昇順</option>
+  <option value="desc">降順</option>
+</select>
+<button onclick="loadProducts()">並び替え</button>
+</div>
+
 <ul id="productList"></ul>
 </div>
 
@@ -81,34 +97,33 @@ button { margin:4px 0; }
 <input id="modalName" placeholder="商品名">
 
 <label class="small">メーカー</label>
-<div class="row">
+<div class="flex">
   <select id="modalMaker"></select>
-  <button onclick="addMasterFromModal('makers')">＋</button>
-  <button onclick="editMasterFromModal('makers')">✏</button>
+  <button onclick="addMaster('makers')">＋</button>
+  <button onclick="editMaster('makers')">✏</button>
 </div>
 
 <label class="small">カテゴリ</label>
-<div class="row">
+<div class="flex">
   <select id="modalCategory"></select>
-  <button onclick="addMasterFromModal('categories')">＋</button>
-  <button onclick="editMasterFromModal('categories')">✏</button>
+  <button onclick="addMaster('categories')">＋</button>
+  <button onclick="editMaster('categories')">✏</button>
 </div>
 
-<input id="modalQty" type="number" value="1" min="1">
-<input id="modalPrice" type="number" placeholder="仕入単価">
-<input id="modalRetail" type="number" placeholder="上代">
+<input id="modalQty" type="number" value="1">
+<input id="modalPrice" placeholder="仕入単価">
+<input id="modalRetail" placeholder="販売価格">
 
-<button onclick="saveOnly()">💾 保存のみ</button>
+<button onclick="saveOnly()">💾 保存</button>
 <button onclick="submitModal('in')">➕ 仕入</button>
 <button onclick="submitModal('out')">➖ 販売</button>
-<button onclick="cancelModal()">キャンセル</button>
+<button onclick="closeModal()">キャンセル</button>
 </div>
 </div>
 
 <script src="https://unpkg.com/quagga@0.12.1/dist/quagga.min.js"></script>
 
 <script>
-/* Firebase */
 firebase.initializeApp({
   apiKey: "AIzaSyCaFkgFPGtYN0GJdo-20mRHJqLLOfsaAFI",
   authDomain: "inventory-mvpcc.firebaseapp.com",
@@ -118,6 +133,7 @@ const auth=firebase.auth();
 const db=firebase.firestore();
 
 let currentBarcode=null;
+let filter={};
 
 /* 認証 */
 function login(){ auth.signInWithEmailAndPassword(email.value,password.value).catch(e=>loginMsg.textContent=e.message); }
@@ -125,50 +141,39 @@ function signup(){ auth.createUserWithEmailAndPassword(email.value,password.valu
 function logout(){ auth.signOut(); }
 
 /* マスター */
-async function loadSelect(col, select){
-  select.innerHTML="";
-  const snap=await db.collection(col).orderBy("name").get();
-  snap.forEach(d=>{
-    const o=document.createElement("option");
-    o.value=o.textContent=d.data().name;
-    select.appendChild(o);
-  });
+async function loadMasters(){
+  const load=async(col,sel,all)=>{
+    sel.innerHTML=all?"<option value=''>すべて</option>":"";
+    const s=await db.collection(col).orderBy("name").get();
+    s.forEach(d=>sel.innerHTML+=`<option>${d.data().name}</option>`);
+  };
+  await load("makers",modalMaker);
+  await load("categories",modalCategory);
+  await load("makers",fMaker,true);
+  await load("categories",fCategory,true);
 }
-async function loadModalMasters(){
-  await loadSelect("makers", modalMaker);
-  await loadSelect("categories", modalCategory);
+function addMaster(col){
+  const n=prompt("追加名");
+  if(n) db.collection(col).add({name:n}).then(loadMasters);
 }
-async function addMasterFromModal(col){
-  const name=prompt("追加する名前");
-  if(!name) return;
-  await db.collection(col).add({name});
-  await loadModalMasters();
-  if(col==="makers") modalMaker.value=name;
-  if(col==="categories") modalCategory.value=name;
-}
-async function editMasterFromModal(col){
-  const select=col==="makers"?modalMaker:modalCategory;
-  const before=select.value;
-  const after=prompt("新しい名前", before);
-  if(!after) return;
-  const snap=await db.collection(col).where("name","==",before).get();
-  snap.forEach(d=>d.ref.update({name:after}));
-  await loadModalMasters();
-  select.value=after;
+function editMaster(col){
+  const b=prompt("変更前");
+  const a=prompt("変更後");
+  if(!b||!a) return;
+  db.collection(col).where("name","==",b).get()
+    .then(s=>s.forEach(d=>d.ref.update({name:a})))
+    .then(loadMasters);
 }
 
-/* 商品 */
-function openModal(barcode){
-  currentBarcode=barcode;
-  modalBarcode.textContent="バーコード: "+barcode;
-  modalName.value="";
-  modalQty.value=1;
-  modalPrice.value="";
-  modalRetail.value="";
+/* モーダル */
+function openModal(b){
+  currentBarcode=b;
+  modalBarcode.textContent="バーコード: "+b;
+  modalName.value=""; modalQty.value=1;
+  modalPrice.value=""; modalRetail.value="";
   modal.style.display="flex";
-
-  loadModalMasters().then(()=>{
-    db.collection("products").doc(barcode).get().then(s=>{
+  loadMasters().then(()=>{
+    db.collection("products").doc(b).get().then(s=>{
       if(!s.exists) return;
       const p=s.data();
       modalName.value=p.name||"";
@@ -179,10 +184,9 @@ function openModal(barcode){
     });
   });
 }
-function cancelModal(){ currentBarcode=null; modal.style.display="none"; }
+function closeModal(){ currentBarcode=null; modal.style.display="none"; }
 
 async function saveOnly(){
-  if(!currentBarcode) return;
   await db.collection("products").doc(currentBarcode).set({
     barcode:currentBarcode,
     name:modalName.value,
@@ -191,80 +195,93 @@ async function saveOnly(){
     latestPrice:+modalPrice.value||0,
     retailPrice:+modalRetail.value||0
   },{merge:true});
-  cancelModal(); loadProducts();
+  closeModal(); loadProducts();
 }
 
-async function submitModal(type){
-  const ref=db.collection("products").doc(currentBarcode);
-  const snap=await ref.get();
-  let p=snap.exists?snap.data():{stock:0,averageCost:0};
-  const qty=+modalQty.value;
-
-  if(type==="in"){
-    p.averageCost=((p.averageCost*p.stock)+(+modalPrice.value*qty))/(p.stock+qty);
-    p.stock+=qty;
-  }else{
-    if(p.stock<qty) return alert("在庫不足");
-    p.stock-=qty;
-  }
-
-  await ref.set({
+async function submitModal(t){
+  const r=db.collection("products").doc(currentBarcode);
+  const s=await r.get();
+  let p=s.exists?s.data():{stock:0,averageCost:0};
+  const q=+modalQty.value;
+  if(t==="in"){ p.stock+=q; }
+  else{ if(p.stock<q) return alert("在庫不足"); p.stock-=q; }
+  await r.set({
     barcode:currentBarcode,
     name:modalName.value,
     manufacturer:modalMaker.value,
     category:modalCategory.value,
     stock:p.stock,
-    averageCost:p.averageCost,
     latestPrice:+modalPrice.value||0,
     retailPrice:+modalRetail.value||0
   },{merge:true});
-
-  cancelModal(); loadProducts();
+  closeModal(); loadProducts();
 }
 
-/* 一覧＋並び替え */
+/* 一覧 */
 async function loadProducts(){
   productList.innerHTML="";
-  const snap=await db.collection("products").get();
-  let products=[];
-  snap.forEach(d=>products.push(d.data()));
+  let arr=[];
+  const s=await db.collection("products").get();
+  s.forEach(d=>{
+    const p=d.data();
+    if(filter.name && !p.name?.includes(filter.name)) return;
+    if(filter.barcode && !p.barcode.includes(filter.barcode)) return;
+    if(filter.maker && p.manufacturer!==filter.maker) return;
+    if(filter.category && p.category!==filter.category) return;
+    arr.push(p);
+  });
 
-  const sort=sortSelect.value;
-  if(sort==="priceAsc") products.sort((a,b)=>(a.latestPrice||0)-(b.latestPrice||0));
-  if(sort==="priceDesc") products.sort((a,b)=>(b.latestPrice||0)-(a.latestPrice||0));
-  if(sort==="categoryAsc") products.sort((a,b)=>(a.category||"").localeCompare(b.category||""));
+  const k=sortKey.value, o=sortOrder.value;
+  if(k){
+    arr.sort((a,b)=>{
+      let x=a[k]||"", y=b[k]||"";
+      if(typeof x==="number") return o==="asc"?x-y:y-x;
+      return o==="asc"?x.localeCompare(y):y.localeCompare(x);
+    });
+  }
 
-  products.forEach(p=>{
-    const li=document.createElement("li");
-    li.className="product";
-    li.innerHTML=`
+  arr.forEach(p=>{
+    productList.innerHTML+=`
+    <li class="product">
       <strong>${p.name||"(未入力)"}</strong><br>
       ${p.barcode}<br>
-      カテゴリ: ${p.category||""}<br>
-      仕入価格: ${p.latestPrice||0} 円<br>
-      在庫: <span class="${p.stock===0?'out':''}">${p.stock||0}</span><br>
+      メーカー:${p.manufacturer||""} / ${p.category||""}<br>
+      在庫:<span class="${p.stock===0?'out':''}">${p.stock||0}</span><br>
+      仕入:${p.latestPrice||0} / 販売:${p.retailPrice||0}<br>
       <button onclick="openModal('${p.barcode}')">編集</button>
-    `;
-    productList.appendChild(li);
+    </li>`;
   });
+}
+
+/* フィルタ */
+function applyFilter(){
+  filter={
+    name:fName.value.trim(),
+    barcode:fBarcode.value.trim(),
+    maker:fMaker.value,
+    category:fCategory.value
+  };
+  loadProducts();
+}
+function clearFilter(){
+  filter={};
+  fName.value=fBarcode.value="";
+  fMaker.value=fCategory.value="";
+  loadProducts();
 }
 
 /* スキャン */
 scanBtn.onclick=()=>{
-  Quagga.init({
-    inputStream:{type:"LiveStream",target:"#scanner",constraints:{facingMode:"environment"}},
-    decoder:{readers:["ean_reader"]}
-  },()=>Quagga.start());
+  Quagga.init({inputStream:{type:"LiveStream",target:"#scanner"},decoder:{readers:["ean_reader"]}},
+    ()=>Quagga.start());
   Quagga.onDetected(d=>{
     Quagga.stop();
     openModal(d.codeResult.code);
   });
 };
 function manualBarcodeSet(){
-  const c=manualBarcode.value.trim();
-  if(!c) return;
+  if(manualBarcode.value) openModal(manualBarcode.value.trim());
   manualBarcode.value="";
-  openModal(c);
 }
 
 /* 初期 */
@@ -272,7 +289,7 @@ auth.onAuthStateChanged(u=>{
   if(u){
     loginDiv.classList.add("hidden");
     appDiv.classList.remove("hidden");
-    loadProducts();
+    loadMasters(); loadProducts();
   }
 });
 </script>
