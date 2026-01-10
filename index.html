@@ -3,7 +3,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>在庫管理アプリ（完全版・削除＆並び替え修正）</title>
+<title>在庫管理アプリ（完全版・編集修正＆在庫赤）</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <style>
@@ -75,7 +75,7 @@ button { margin:4px 0; }
   <option value="category">カテゴリ</option>
   <option value="manufacturer">メーカー</option>
   <option value="stock">在庫数</option>
-  <option value="latestPrice">仕入れ価格</option>
+  <option value="latestPrice">仕入価格</option>
   <option value="retailPrice">販売価格</option>
 </select>
 <select id="sortOrder">
@@ -112,14 +112,14 @@ button { margin:4px 0; }
   <button onclick="editMaster('categories')">✏</button>
 </div>
 
-<input id="modalQty" type="number" value="1">
+<input id="modalQty" type="number" value="1" min="1">
 <input id="modalPrice" placeholder="仕入単価">
 <input id="modalRetail" placeholder="販売価格">
 
-<button onclick="saveOnly()">💾 保存のみ</button>
+<button onclick="saveOnly()">💾 保存</button>
 <button onclick="submitModal('in')">➕ 仕入</button>
 <button onclick="submitModal('out')">➖ 販売</button>
-<button class="danger" onclick="deleteProduct()">🗑 完全削除</button>
+<button class="danger" onclick="deleteProduct()">🗑 削除</button>
 <button onclick="closeModal()">キャンセル</button>
 </div>
 </div>
@@ -168,26 +168,29 @@ function editMaster(c){
     .then(loadMasters);
 }
 
-/* モーダル */
-function openModal(b){
+/* モーダル（修正済） */
+async function openModal(b){
   currentBarcode=b;
   modalBarcode.textContent="バーコード: "+b;
-  modalName.value=""; modalQty.value=1;
-  modalPrice.value=""; modalRetail.value="";
+  modalName.value="";
+  modalQty.value=1;
+  modalPrice.value="";
+  modalRetail.value="";
   modal.style.display="flex";
-  loadMasters().then(()=>{
-    db.collection("products").doc(b).get().then(s=>{
-      if(!s.exists) return;
-      const p=s.data();
-      modalName.value=p.name||"";
-      modalMaker.value=p.manufacturer||"";
-      modalCategory.value=p.category||"";
-      modalPrice.value=p.latestPrice||"";
-      modalRetail.value=p.retailPrice||"";
-    });
-  });
+
+  await loadMasters();
+
+  const snap = await db.collection("products").doc(b).get();
+  if(!snap.exists) return;
+  const p=snap.data();
+  modalName.value=p.name||"";
+  modalMaker.value=p.manufacturer||"";
+  modalCategory.value=p.category||"";
+  modalPrice.value=p.latestPrice||"";
+  modalRetail.value=p.retailPrice||"";
 }
-function closeModal(){currentBarcode=null;modal.style.display="none";}
+
+function closeModal(){ currentBarcode=null; modal.style.display="none"; }
 
 /* 保存 */
 async function saveOnly(){
@@ -201,13 +204,19 @@ async function saveOnly(){
   },{merge:true});
   closeModal(); loadProducts();
 }
+
 async function submitModal(t){
   const ref=db.collection("products").doc(currentBarcode);
   const snap=await ref.get();
   let p=snap.exists?snap.data():{stock:0};
   const q=Number(modalQty.value)||0;
+
   if(t==="in") p.stock+=q;
-  else{ if(p.stock<q) return alert("在庫不足"); p.stock-=q; }
+  else{
+    if(p.stock<q) return alert("在庫不足");
+    p.stock-=q;
+  }
+
   await ref.set({
     barcode:currentBarcode,
     name:modalName.value,
@@ -217,12 +226,12 @@ async function submitModal(t){
     latestPrice:Number(modalPrice.value)||0,
     retailPrice:Number(modalRetail.value)||0
   },{merge:true});
+
   closeModal(); loadProducts();
 }
 
-/* 完全削除 */
 async function deleteProduct(){
-  if(!confirm("この商品を完全に削除しますか？")) return;
+  if(!confirm("完全に削除しますか？")) return;
   await db.collection("products").doc(currentBarcode).delete();
   closeModal(); loadProducts();
 }
@@ -244,21 +253,23 @@ async function loadProducts(){
   const key=sortKey.value, order=sortOrder.value;
   if(key){
     arr.sort((a,b)=>{
-      const x=Number(a[key]??a[key]??0);
-      const y=Number(b[key]??b[key]??0);
+      const x=Number(a[key]??0);
+      const y=Number(b[key]??0);
       if(!isNaN(x)&&!isNaN(y)) return order==="asc"?x-y:y-x;
-      return order==="asc" ? String(a[key]||"").localeCompare(String(b[key]||""))
-                           : String(b[key]||"").localeCompare(String(a[key]||""));
+      return order==="asc"
+        ? String(a[key]||"").localeCompare(String(b[key]||""))
+        : String(b[key]||"").localeCompare(String(a[key]||""));
     });
   }
 
   arr.forEach(p=>{
+    const stock = Number(p.stock)||0;
     productList.innerHTML+=`
     <li class="product">
       <strong>${p.name||"(未入力)"}</strong><br>
       ${p.barcode}<br>
       ${p.manufacturer||""} / ${p.category||""}<br>
-      在庫:<span class="${p.stock===0?'out':''}">${p.stock||0}</span><br>
+      在庫: <span class="${stock===0?'out':''}">${stock}</span><br>
       仕入:${p.latestPrice||0} / 販売:${p.retailPrice||0}<br>
       <button onclick="openModal('${p.barcode}')">編集</button>
     </li>`;
@@ -284,13 +295,16 @@ function clearFilter(){
 
 /* スキャン */
 scanBtn.onclick=()=>{
-  Quagga.init({inputStream:{type:"LiveStream",target:"#scanner"},decoder:{readers:["ean_reader"]}},
-    ()=>Quagga.start());
+  Quagga.init(
+    {inputStream:{type:"LiveStream",target:"#scanner"},decoder:{readers:["ean_reader"]}},
+    ()=>Quagga.start()
+  );
   Quagga.onDetected(d=>{
     Quagga.stop();
     openModal(d.codeResult.code);
   });
 };
+
 function manualBarcodeSet(){
   if(manualBarcode.value) openModal(manualBarcode.value.trim());
   manualBarcode.value="";
