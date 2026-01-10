@@ -43,7 +43,7 @@ button { margin:4px 0; }
   <p id="loginMsg" style="color:red;"></p>
 </div>
 
-<!-- アプリ -->
+<!-- アプリ本体 -->
 <div id="appDiv" class="hidden">
 <button onclick="logout()">ログアウト</button>
 
@@ -59,8 +59,8 @@ button { margin:4px 0; }
 
 <hr>
 <h3>🔍 絞り込み検索</h3>
-<input id="fName" placeholder="商品名">
-<input id="fBarcode" placeholder="バーコード">
+<input id="fBarcode" placeholder="バーコード検索">
+<input id="fName" placeholder="商品名検索">
 <select id="fMaker"></select>
 <select id="fCategory"></select>
 <button onclick="applyFilter()">検索</button>
@@ -68,7 +68,7 @@ button { margin:4px 0; }
 
 <hr>
 <div class="flex">
-<h2 style="flex:1;">商品一覧</h2>
+<h3 style="flex:1;">↕ 並び替え</h3>
 <select id="sortKey">
   <option value="">並び替えなし</option>
   <option value="name">商品名</option>
@@ -82,13 +82,15 @@ button { margin:4px 0; }
   <option value="asc">昇順</option>
   <option value="desc">降順</option>
 </select>
-<button onclick="loadProducts()">並び替え</button>
+<button onclick="loadProducts()">適用</button>
 </div>
 
+<hr>
+<h2>商品一覧</h2>
 <ul id="productList"></ul>
 </div>
 
-<!-- 商品モーダル -->
+<!-- 商品登録モーダル -->
 <div id="modal" class="modal">
 <div class="modalContent">
 <h3>商品登録 / 編集</h3>
@@ -114,7 +116,7 @@ button { margin:4px 0; }
 <input id="modalPrice" placeholder="仕入単価">
 <input id="modalRetail" placeholder="販売価格">
 
-<button onclick="saveOnly()">💾 保存</button>
+<button onclick="saveOnly()">💾 保存のみ</button>
 <button onclick="submitModal('in')">➕ 仕入</button>
 <button onclick="submitModal('out')">➖ 販売</button>
 <button onclick="closeModal()">キャンセル</button>
@@ -153,12 +155,12 @@ async function loadMasters(){
   await load("categories",fCategory,true);
 }
 function addMaster(col){
-  const n=prompt("追加名");
+  const n=prompt("追加する名前");
   if(n) db.collection(col).add({name:n}).then(loadMasters);
 }
 function editMaster(col){
-  const b=prompt("変更前");
-  const a=prompt("変更後");
+  const b=prompt("変更前の名前");
+  const a=prompt("変更後の名前");
   if(!b||!a) return;
   db.collection(col).where("name","==",b).get()
     .then(s=>s.forEach(d=>d.ref.update({name:a})))
@@ -201,7 +203,7 @@ async function saveOnly(){
 async function submitModal(t){
   const r=db.collection("products").doc(currentBarcode);
   const s=await r.get();
-  let p=s.exists?s.data():{stock:0,averageCost:0};
+  let p=s.exists?s.data():{stock:0};
   const q=+modalQty.value;
   if(t==="in"){ p.stock+=q; }
   else{ if(p.stock<q) return alert("在庫不足"); p.stock-=q; }
@@ -217,15 +219,15 @@ async function submitModal(t){
   closeModal(); loadProducts();
 }
 
-/* 一覧 */
+/* 商品一覧 */
 async function loadProducts(){
   productList.innerHTML="";
   let arr=[];
   const s=await db.collection("products").get();
   s.forEach(d=>{
     const p=d.data();
-    if(filter.name && !p.name?.includes(filter.name)) return;
     if(filter.barcode && !p.barcode.includes(filter.barcode)) return;
+    if(filter.name && !p.name?.includes(filter.name)) return;
     if(filter.maker && p.manufacturer!==filter.maker) return;
     if(filter.category && p.category!==filter.category) return;
     arr.push(p);
@@ -256,8 +258,8 @@ async function loadProducts(){
 /* フィルタ */
 function applyFilter(){
   filter={
-    name:fName.value.trim(),
     barcode:fBarcode.value.trim(),
+    name:fName.value.trim(),
     maker:fMaker.value,
     category:fCategory.value
   };
@@ -265,7 +267,7 @@ function applyFilter(){
 }
 function clearFilter(){
   filter={};
-  fName.value=fBarcode.value="";
+  fBarcode.value=fName.value="";
   fMaker.value=fCategory.value="";
   loadProducts();
 }
@@ -284,7 +286,7 @@ function manualBarcodeSet(){
   manualBarcode.value="";
 }
 
-/* 初期 */
+/* 初期化 */
 auth.onAuthStateChanged(u=>{
   if(u){
     loginDiv.classList.add("hidden");
