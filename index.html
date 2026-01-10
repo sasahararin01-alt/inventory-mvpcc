@@ -3,7 +3,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>在庫管理アプリ（完全版・編集修正＆在庫赤）</title>
+<title>在庫管理アプリ（CSV出力対応・完全版）</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <style>
@@ -13,7 +13,7 @@ body { font-family:sans-serif; padding:10px; }
 .out { color:red; font-weight:bold; }
 input, select { width:100%; margin-bottom:6px; }
 button { margin:4px 0; }
-.flex { display:flex; gap:6px; align-items:center; }
+.flex { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
 .modal {
   display:none; position:fixed; inset:0;
   background:rgba(0,0,0,0.6);
@@ -30,6 +30,7 @@ button { margin:4px 0; }
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="https://unpkg.com/quagga@0.12.1/dist/quagga.min.js"></script>
 </head>
 
 <body>
@@ -64,8 +65,12 @@ button { margin:4px 0; }
 <input id="fName" placeholder="商品名検索">
 <select id="fMaker"></select>
 <select id="fCategory"></select>
-<button onclick="applyFilter()">検索</button>
-<button onclick="clearFilter()">解除</button>
+
+<div class="flex">
+  <button onclick="applyFilter()">検索</button>
+  <button onclick="clearFilter()">解除</button>
+  <button onclick="exportCSV()">📤 CSV出力</button>
+</div>
 
 <hr>
 <div class="flex">
@@ -124,8 +129,6 @@ button { margin:4px 0; }
 </div>
 </div>
 
-<script src="https://unpkg.com/quagga@0.12.1/dist/quagga.min.js"></script>
-
 <script>
 firebase.initializeApp({
   apiKey:"AIzaSyCaFkgFPGtYN0GJdo-20mRHJqLLOfsaAFI",
@@ -137,6 +140,7 @@ const db=firebase.firestore();
 
 let currentBarcode=null;
 let filter={};
+let lastProducts=[];
 
 /* 認証 */
 function login(){auth.signInWithEmailAndPassword(email.value,password.value).catch(e=>loginMsg.textContent=e.message);}
@@ -155,20 +159,8 @@ async function loadMasters(){
   await load("makers",fMaker,true);
   await load("categories",fCategory,true);
 }
-function addMaster(c){
-  const n=prompt("追加する名前");
-  if(n) db.collection(c).add({name:n}).then(loadMasters);
-}
-function editMaster(c){
-  const b=prompt("変更前");
-  const a=prompt("変更後");
-  if(!b||!a) return;
-  db.collection(c).where("name","==",b).get()
-    .then(s=>s.forEach(d=>d.ref.update({name:a})))
-    .then(loadMasters);
-}
 
-/* モーダル（修正済） */
+/* モーダル */
 async function openModal(b){
   currentBarcode=b;
   modalBarcode.textContent="バーコード: "+b;
@@ -239,7 +231,7 @@ async function deleteProduct(){
 /* 一覧 */
 async function loadProducts(){
   productList.innerHTML="";
-  let arr=[];
+  lastProducts=[];
   const snap=await db.collection("products").get();
   snap.forEach(d=>{
     const p=d.data();
@@ -247,14 +239,13 @@ async function loadProducts(){
     if(filter.name && !p.name?.includes(filter.name)) return;
     if(filter.maker && p.manufacturer!==filter.maker) return;
     if(filter.category && p.category!==filter.category) return;
-    arr.push(p);
+    lastProducts.push(p);
   });
 
   const key=sortKey.value, order=sortOrder.value;
   if(key){
-    arr.sort((a,b)=>{
-      const x=Number(a[key]??0);
-      const y=Number(b[key]??0);
+    lastProducts.sort((a,b)=>{
+      const x=Number(a[key]??0), y=Number(b[key]??0);
       if(!isNaN(x)&&!isNaN(y)) return order==="asc"?x-y:y-x;
       return order==="asc"
         ? String(a[key]||"").localeCompare(String(b[key]||""))
@@ -262,7 +253,7 @@ async function loadProducts(){
     });
   }
 
-  arr.forEach(p=>{
+  lastProducts.forEach(p=>{
     const stock = Number(p.stock)||0;
     productList.innerHTML+=`
     <li class="product">
@@ -274,6 +265,27 @@ async function loadProducts(){
       <button onclick="openModal('${p.barcode}')">編集</button>
     </li>`;
   });
+}
+
+/* CSV出力 */
+function exportCSV(){
+  if(!lastProducts.length) return alert("出力する商品がありません");
+
+  let csv="バーコード,商品名,メーカー,カテゴリ,在庫数,仕入単価,販売価格\n";
+  lastProducts.forEach(p=>{
+    csv+=`"${p.barcode}","${p.name||""}","${p.manufacturer||""}","${p.category||""}",${p.stock||0},${p.latestPrice||0},${p.retailPrice||0}\n`;
+  });
+
+  const bom=new Uint8Array([0xEF,0xBB,0xBF]);
+  const blob=new Blob([bom,csv],{type:"text/csv"});
+  const url=URL.createObjectURL(blob);
+
+  const a=document.createElement("a");
+  const d=new Date().toISOString().slice(0,10);
+  a.href=url;
+  a.download=`inventory_${d}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 /* フィルタ */
