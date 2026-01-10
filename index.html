@@ -3,7 +3,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>在庫管理アプリ（完全版・安定）</title>
+<title>在庫管理アプリ（完全版・最終安定）</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <style>
@@ -22,6 +22,8 @@ button { margin:4px 0; }
   background:#fff; padding:15px;
   border-radius:6px; width:95%; max-width:420px;
 }
+.row { display:flex; gap:4px; align-items:center; }
+.row select { flex:1; }
 .small { font-size:0.85em; color:#555; }
 </style>
 
@@ -57,20 +59,11 @@ button { margin:4px 0; }
 <button onclick="manualBarcodeSet()">開く</button>
 
 <hr>
-<h3>絞り込み</h3>
-商品名 <input id="filterName">
-バーコード <input id="filterBarcode">
-メーカー <select id="filterMaker"></select>
-カテゴリ <select id="filterCategory"></select>
-<button onclick="applyFilter()">適用</button>
-<button onclick="clearFilter()">解除</button>
-
-<hr>
 <h2>商品一覧</h2>
 <ul id="productList"></ul>
 </div>
 
-<!-- モーダル -->
+<!-- 商品モーダル -->
 <div id="modal" class="modal">
 <div class="modalContent">
 <h3>商品登録 / 編集</h3>
@@ -79,14 +72,18 @@ button { margin:4px 0; }
 <input id="modalName" placeholder="商品名">
 
 <label class="small">メーカー</label>
-<select id="modalMaker"></select>
-<button onclick="addMaster('makers')">＋追加</button>
-<button onclick="renameMaster('makers')">✏ 修正</button>
+<div class="row">
+  <select id="modalMaker"></select>
+  <button onclick="addMasterFromModal('makers')">＋</button>
+  <button onclick="editMasterFromModal('makers')">✏</button>
+</div>
 
 <label class="small">カテゴリ</label>
-<select id="modalCategory"></select>
-<button onclick="addMaster('categories')">＋追加</button>
-<button onclick="renameMaster('categories')">✏ 修正</button>
+<div class="row">
+  <select id="modalCategory"></select>
+  <button onclick="addMasterFromModal('categories')">＋</button>
+  <button onclick="editMasterFromModal('categories')">✏</button>
+</div>
 
 <input id="modalQty" type="number" value="1" min="1">
 <input id="modalPrice" type="number" placeholder="仕入単価">
@@ -102,27 +99,26 @@ button { margin:4px 0; }
 <script src="https://unpkg.com/quagga@0.12.1/dist/quagga.min.js"></script>
 
 <script>
-const firebaseConfig = {
+/* Firebase */
+firebase.initializeApp({
   apiKey: "AIzaSyCaFkgFPGtYN0GJdo-20mRHJqLLOfsaAFI",
   authDomain: "inventory-mvpcc.firebaseapp.com",
   projectId: "inventory-mvpcc"
-};
-firebase.initializeApp(firebaseConfig);
+});
 const auth=firebase.auth();
 const db=firebase.firestore();
 
-let tempBarcode=null;
-let filter={};
+let currentBarcode=null;
 
 /* ===== 認証 ===== */
-function login(){auth.signInWithEmailAndPassword(email.value,password.value).catch(e=>loginMsg.textContent=e.message);}
-function signup(){auth.createUserWithEmailAndPassword(email.value,password.value).catch(e=>loginMsg.textContent=e.message);}
-function logout(){auth.signOut();}
+function login(){ auth.signInWithEmailAndPassword(email.value,password.value).catch(e=>loginMsg.textContent=e.message); }
+function signup(){ auth.createUserWithEmailAndPassword(email.value,password.value).catch(e=>loginMsg.textContent=e.message); }
+function logout(){ auth.signOut(); }
 
 /* ===== マスター ===== */
-async function loadMaster(col, select, all=false){
-  select.innerHTML = all ? "<option value=''>すべて</option>" : "";
-  const snap = await db.collection(col).orderBy("name").get();
+async function loadSelect(col, select){
+  select.innerHTML="";
+  const snap=await db.collection(col).orderBy("name").get();
   snap.forEach(d=>{
     const o=document.createElement("option");
     o.value=o.textContent=d.data().name;
@@ -130,67 +126,65 @@ async function loadMaster(col, select, all=false){
   });
 }
 
-async function loadAllMasters(){
-  await loadMaster("makers", modalMaker);
-  await loadMaster("categories", modalCategory);
-  await loadMaster("makers", filterMaker, true);
-  await loadMaster("categories", filterCategory, true);
+async function loadModalMasters(){
+  await loadSelect("makers", modalMaker);
+  await loadSelect("categories", modalCategory);
 }
 
-async function addMaster(col){
+async function addMasterFromModal(col){
   const name=prompt("追加する名前");
   if(!name) return;
   await db.collection(col).add({name});
-  await loadAllMasters();
+  await loadModalMasters();
+  if(col==="makers") modalMaker.value=name;
+  if(col==="categories") modalCategory.value=name;
 }
 
-async function renameMaster(col){
-  const before=prompt("現在の名前");
-  if(!before) return;
-  const after=prompt("新しい名前");
+async function editMasterFromModal(col){
+  const select = col==="makers" ? modalMaker : modalCategory;
+  const before = select.value;
+  if(!before) return alert("選択してください");
+  const after = prompt("新しい名前", before);
   if(!after) return;
 
-  const snap=await db.collection(col).where("name","==",before).get();
-  if(snap.empty) return alert("見つかりません");
-
-  for(const d of snap.docs){
-    await d.ref.update({name:after});
-  }
-  await loadAllMasters();
+  const snap = await db.collection(col).where("name","==",before).get();
+  snap.forEach(d=>d.ref.update({name:after}));
+  await loadModalMasters();
+  select.value=after;
 }
 
 /* ===== 商品 ===== */
-function openModal(code){
-  tempBarcode=code;
-  modalBarcode.textContent="バーコード: "+code;
+function openModal(barcode){
+  currentBarcode=barcode;
+  modalBarcode.textContent="バーコード: "+barcode;
   modalName.value="";
   modalQty.value=1;
   modalPrice.value="";
   modalRetail.value="";
   modal.style.display="flex";
 
-  db.collection("products").doc(code).get().then(s=>{
-    if(!s.exists) return;
-    const p=s.data();
-    modalName.value=p.name||"";
-    modalPrice.value=p.latestPrice||"";
-    modalRetail.value=p.retailPrice||"";
-    loadAllMasters().then(()=>{
+  loadModalMasters().then(()=>{
+    db.collection("products").doc(barcode).get().then(s=>{
+      if(!s.exists) return;
+      const p=s.data();
+      modalName.value=p.name||"";
       modalMaker.value=p.manufacturer||"";
       modalCategory.value=p.category||"";
+      modalPrice.value=p.latestPrice||"";
+      modalRetail.value=p.retailPrice||"";
     });
   });
 }
 
 function cancelModal(){
-  tempBarcode=null;
+  currentBarcode=null;
   modal.style.display="none";
 }
 
 async function saveOnly(){
-  if(!tempBarcode) return;
-  await db.collection("products").doc(tempBarcode).set({
-    barcode:tempBarcode,
+  if(!currentBarcode) return;
+  await db.collection("products").doc(currentBarcode).set({
+    barcode:currentBarcode,
     name:modalName.value,
     manufacturer:modalMaker.value,
     category:modalCategory.value,
@@ -201,7 +195,7 @@ async function saveOnly(){
 }
 
 async function submitModal(type){
-  const ref=db.collection("products").doc(tempBarcode);
+  const ref=db.collection("products").doc(currentBarcode);
   const snap=await ref.get();
   let p=snap.exists?snap.data():{stock:0,averageCost:0};
   const qty=+modalQty.value;
@@ -215,7 +209,7 @@ async function submitModal(type){
   }
 
   await ref.set({
-    barcode:tempBarcode,
+    barcode:currentBarcode,
     name:modalName.value,
     manufacturer:modalMaker.value,
     category:modalCategory.value,
@@ -234,38 +228,16 @@ async function loadProducts(){
   const snap=await db.collection("products").get();
   snap.forEach(d=>{
     const p=d.data();
-    if(filter.name && !p.name?.includes(filter.name)) return;
-    if(filter.barcode && !p.barcode.includes(filter.barcode)) return;
-    if(filter.maker && p.manufacturer!==filter.maker) return;
-    if(filter.category && p.category!==filter.category) return;
-
     const li=document.createElement("li");
     li.className="product";
     li.innerHTML=`
       <strong>${p.name||"(未入力)"}</strong><br>
       ${p.barcode}<br>
-      在庫: <span class="${p.stock===0?'out':''}">${p.stock}</span><br>
+      在庫: <span class="${p.stock===0?'out':''}">${p.stock||0}</span><br>
       <button onclick="openModal('${p.barcode}')">編集</button>
     `;
     productList.appendChild(li);
   });
-}
-
-/* ===== フィルタ ===== */
-function applyFilter(){
-  filter={
-    name:filterName.value.trim(),
-    barcode:filterBarcode.value.trim(),
-    maker:filterMaker.value,
-    category:filterCategory.value
-  };
-  loadProducts();
-}
-function clearFilter(){
-  filter={};
-  filterName.value=filterBarcode.value="";
-  filterMaker.value=filterCategory.value="";
-  loadProducts();
 }
 
 /* ===== スキャン ===== */
@@ -293,7 +265,6 @@ auth.onAuthStateChanged(u=>{
   if(u){
     loginDiv.classList.add("hidden");
     appDiv.classList.remove("hidden");
-    loadAllMasters();
     loadProducts();
   }
 });
