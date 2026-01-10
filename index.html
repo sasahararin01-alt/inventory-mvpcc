@@ -3,7 +3,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>在庫管理アプリ（完全版・最終安定）</title>
+<title>在庫管理アプリ（完全版・並び替え対応）</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <style>
@@ -59,6 +59,15 @@ button { margin:4px 0; }
 <button onclick="manualBarcodeSet()">開く</button>
 
 <hr>
+<h3>並び替え</h3>
+<select id="sortSelect" onchange="loadProducts()">
+  <option value="">並び替えなし</option>
+  <option value="priceAsc">仕入れ価格：安い順</option>
+  <option value="priceDesc">仕入れ価格：高い順</option>
+  <option value="categoryAsc">カテゴリ：あいうえお順</option>
+</select>
+
+<hr>
 <h2>商品一覧</h2>
 <ul id="productList"></ul>
 </div>
@@ -110,12 +119,12 @@ const db=firebase.firestore();
 
 let currentBarcode=null;
 
-/* ===== 認証 ===== */
+/* 認証 */
 function login(){ auth.signInWithEmailAndPassword(email.value,password.value).catch(e=>loginMsg.textContent=e.message); }
 function signup(){ auth.createUserWithEmailAndPassword(email.value,password.value).catch(e=>loginMsg.textContent=e.message); }
 function logout(){ auth.signOut(); }
 
-/* ===== マスター ===== */
+/* マスター */
 async function loadSelect(col, select){
   select.innerHTML="";
   const snap=await db.collection(col).orderBy("name").get();
@@ -125,12 +134,10 @@ async function loadSelect(col, select){
     select.appendChild(o);
   });
 }
-
 async function loadModalMasters(){
   await loadSelect("makers", modalMaker);
   await loadSelect("categories", modalCategory);
 }
-
 async function addMasterFromModal(col){
   const name=prompt("追加する名前");
   if(!name) return;
@@ -139,21 +146,18 @@ async function addMasterFromModal(col){
   if(col==="makers") modalMaker.value=name;
   if(col==="categories") modalCategory.value=name;
 }
-
 async function editMasterFromModal(col){
-  const select = col==="makers" ? modalMaker : modalCategory;
-  const before = select.value;
-  if(!before) return alert("選択してください");
-  const after = prompt("新しい名前", before);
+  const select=col==="makers"?modalMaker:modalCategory;
+  const before=select.value;
+  const after=prompt("新しい名前", before);
   if(!after) return;
-
-  const snap = await db.collection(col).where("name","==",before).get();
+  const snap=await db.collection(col).where("name","==",before).get();
   snap.forEach(d=>d.ref.update({name:after}));
   await loadModalMasters();
   select.value=after;
 }
 
-/* ===== 商品 ===== */
+/* 商品 */
 function openModal(barcode){
   currentBarcode=barcode;
   modalBarcode.textContent="バーコード: "+barcode;
@@ -175,11 +179,7 @@ function openModal(barcode){
     });
   });
 }
-
-function cancelModal(){
-  currentBarcode=null;
-  modal.style.display="none";
-}
+function cancelModal(){ currentBarcode=null; modal.style.display="none"; }
 
 async function saveOnly(){
   if(!currentBarcode) return;
@@ -222,17 +222,26 @@ async function submitModal(type){
   cancelModal(); loadProducts();
 }
 
-/* ===== 一覧 ===== */
+/* 一覧＋並び替え */
 async function loadProducts(){
   productList.innerHTML="";
   const snap=await db.collection("products").get();
-  snap.forEach(d=>{
-    const p=d.data();
+  let products=[];
+  snap.forEach(d=>products.push(d.data()));
+
+  const sort=sortSelect.value;
+  if(sort==="priceAsc") products.sort((a,b)=>(a.latestPrice||0)-(b.latestPrice||0));
+  if(sort==="priceDesc") products.sort((a,b)=>(b.latestPrice||0)-(a.latestPrice||0));
+  if(sort==="categoryAsc") products.sort((a,b)=>(a.category||"").localeCompare(b.category||""));
+
+  products.forEach(p=>{
     const li=document.createElement("li");
     li.className="product";
     li.innerHTML=`
       <strong>${p.name||"(未入力)"}</strong><br>
       ${p.barcode}<br>
+      カテゴリ: ${p.category||""}<br>
+      仕入価格: ${p.latestPrice||0} 円<br>
       在庫: <span class="${p.stock===0?'out':''}">${p.stock||0}</span><br>
       <button onclick="openModal('${p.barcode}')">編集</button>
     `;
@@ -240,19 +249,17 @@ async function loadProducts(){
   });
 }
 
-/* ===== スキャン ===== */
+/* スキャン */
 scanBtn.onclick=()=>{
   Quagga.init({
     inputStream:{type:"LiveStream",target:"#scanner",constraints:{facingMode:"environment"}},
     decoder:{readers:["ean_reader"]}
   },()=>Quagga.start());
-
   Quagga.onDetected(d=>{
     Quagga.stop();
     openModal(d.codeResult.code);
   });
 };
-
 function manualBarcodeSet(){
   const c=manualBarcode.value.trim();
   if(!c) return;
