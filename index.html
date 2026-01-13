@@ -3,7 +3,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>在庫管理アプリ（iPhone / Android 完全安定版）</title>
+<title>在庫管理アプリ（iPhone / Android 完全版）</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <style>
@@ -33,6 +33,7 @@ button { cursor:pointer; }
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="https://unpkg.com/quagga@0.12.1/dist/quagga.min.js"></script>
 </head>
 
 <body>
@@ -41,13 +42,21 @@ button { cursor:pointer; }
 <div id="loginDiv">
   <input id="email" placeholder="メール">
   <input id="password" type="password" placeholder="パスワード">
-  <button id="loginBtn">ログイン</button>
-  <button id="signupBtn">新規登録</button>
+  <button onclick="login()">ログイン</button>
+  <button onclick="signup()">新規登録</button>
   <p id="loginMsg" style="color:red;"></p>
 </div>
 
 <div id="appDiv" class="hidden">
-<button id="logoutBtn">ログアウト</button>
+<button onclick="logout()">ログアウト</button>
+
+<hr>
+<button id="scanBtn">📷 バーコードを読む</button>
+<div id="scanner"></div>
+
+<hr>
+<input id="manualBarcode" placeholder="手動バーコード">
+<button onclick="manualBarcodeSet()">開く</button>
 
 <hr>
 <ul id="productList"></ul>
@@ -58,20 +67,36 @@ button { cursor:pointer; }
 <div class="modalContent">
 <h3>商品登録 / 編集</h3>
 <p id="modalBarcode"></p>
+
+<!-- ★ 現在在庫表示（追加） -->
 <p class="stockView">現在庫：<span id="modalStock">0</span></p>
 
 <input id="modalName" placeholder="商品名">
+
+<div class="flex">
+<select id="modalMaker"></select>
+<button onclick="addMaster('makers')">＋</button>
+<button onclick="editMaster('makers')">✏</button>
+<button class="danger" onclick="deleteMaster('makers')">🗑</button>
+</div>
+
+<div class="flex">
+<select id="modalCategory"></select>
+<button onclick="addMaster('categories')">＋</button>
+<button onclick="editMaster('categories')">✏</button>
+<button class="danger" onclick="deleteMaster('categories')">🗑</button>
+</div>
+
+<input id="modalQty" type="number" min="1" value="1">
 <input id="modalPrice" type="number" placeholder="仕入価格">
 <input id="modalRetail" type="number" placeholder="販売価格">
-<input id="modalQty" type="number" min="1" value="1">
 
-<button onclick="submitStock('in')">仕入</button>
-<button onclick="submitStock('out')">販売</button>
-<button onclick="submitStock('use')">使用</button>
 <button onclick="saveOnly()">保存</button>
+<button onclick="submitModal('in')">仕入</button>
+<button onclick="submitModal('out')">販売</button>
 
-<button class="danger" onclick="deleteProduct()">商品削除</button>
-<button onclick="closeModal()">閉じる</button>
+<button class="danger" onclick="deleteProduct()">削除</button>
+<button onclick="closeModal()">キャンセル</button>
 </div>
 </div>
 
@@ -85,101 +110,164 @@ firebase.initializeApp({
 const auth=firebase.auth();
 const db=firebase.firestore();
 
-/* DOM */
-const $=id=>document.getElementById(id);
-const productList=$("productList");
-
 let currentBarcode=null;
+let products=[];
 
 /* 認証 */
-$("loginBtn").onclick=()=>auth.signInWithEmailAndPassword(email.value,password.value);
-$("signupBtn").onclick=()=>auth.createUserWithEmailAndPassword(email.value,password.value);
-$("logoutBtn").onclick=()=>auth.signOut();
+function login(){auth.signInWithEmailAndPassword(email.value,password.value).catch(e=>loginMsg.textContent=e.message);}
+function signup(){auth.createUserWithEmailAndPassword(email.value,password.value).catch(e=>loginMsg.textContent=e.message);}
+function logout(){auth.signOut();}
+
+/* マスター */
+async function loadMaster(col, sel){
+  sel.innerHTML="";
+  const s=await db.collection(col).orderBy("name").get();
+  s.forEach(d=>{
+    const n=d.data().name;
+    sel.insertAdjacentHTML("beforeend",`<option value="${n}">${n}</option>`);
+  });
+}
+async function loadMasters(){
+  await loadMaster("makers",modalMaker);
+  await loadMaster("categories",modalCategory);
+}
+function addMaster(col){
+  const n=prompt("追加する名前");
+  if(n) db.collection(col).add({name:n}).then(loadMasters);
+}
+function editMaster(col){
+  const b=prompt("変更前の名前");
+  const a=prompt("変更後の名前");
+  if(!b||!a) return;
+  db.collection(col).where("name","==",b).get().then(s=>{
+    s.forEach(d=>d.ref.update({name:a}));
+  }).then(loadMasters);
+}
+function deleteMaster(col){
+  const n=prompt("削除する名前");
+  if(!n || !confirm(`「${n}」を削除しますか？`)) return;
+  db.collection(col).where("name","==",n).get().then(s=>{
+    s.forEach(d=>d.ref.delete());
+  }).then(loadMasters);
+}
+
+/* モーダル */
+async function openModal(barcode){
+  currentBarcode=barcode;
+  modal.style.display="flex";
+  modalBarcode.textContent="バーコード: "+barcode;
+  modalName.value="";
+  modalQty.value=1;
+  modalPrice.value="";
+  modalRetail.value="";
+  modalStock.textContent="0";
+
+  await loadMasters();
+  const s=await db.collection("products").doc(barcode).get();
+  if(s.exists){
+    const p=s.data();
+    modalName.value=p.name||"";
+    modalMaker.value=p.manufacturer||"";
+    modalCategory.value=p.category||"";
+    modalPrice.value=p.latestPrice||"";
+    modalRetail.value=p.retailPrice||"";
+    modalStock.textContent=p.stock||0;
+  }
+}
+function closeModal(){
+  currentBarcode=null;
+  modal.style.display="none";
+}
+
+/* 保存 */
+async function saveOnly(){
+  if(!currentBarcode) return;
+  await db.collection("products").doc(currentBarcode).set({
+    barcode:currentBarcode,
+    name:modalName.value,
+    manufacturer:modalMaker.value,
+    category:modalCategory.value,
+    latestPrice:+modalPrice.value||0,
+    retailPrice:+modalRetail.value||0
+  },{merge:true});
+  loadProducts(); closeModal();
+}
+
+/* 入出庫 */
+async function submitModal(type){
+  const ref=db.collection("products").doc(currentBarcode);
+  const s=await ref.get();
+  let stock=s.exists?(s.data().stock||0):0;
+  const q=+modalQty.value||0;
+  if(type==="in") stock+=q;
+  else if(stock<q) return alert("在庫不足");
+  else stock-=q;
+
+  await ref.set({
+    barcode:currentBarcode,
+    name:modalName.value,
+    manufacturer:modalMaker.value,
+    category:modalCategory.value,
+    stock,
+    latestPrice:+modalPrice.value||0,
+    retailPrice:+modalRetail.value||0
+  },{merge:true});
+
+  loadProducts(); closeModal();
+}
+
+/* 削除 */
+async function deleteProduct(){
+  if(currentBarcode && confirm("削除しますか？")){
+    await db.collection("products").doc(currentBarcode).delete();
+    loadProducts(); closeModal();
+  }
+}
 
 /* 一覧 */
 async function loadProducts(){
   productList.innerHTML="";
+  products=[];
   const s=await db.collection("products").get();
   s.forEach(d=>{
     const p=d.data();
+    products.push(p);
+  });
+  products.forEach(p=>{
     productList.insertAdjacentHTML("beforeend",`
       <li class="product">
         <strong>${p.name||"(未入力)"}</strong><br>
         ${p.barcode}<br>
-        在庫：${p.stock||0}<br>
+        ${p.manufacturer||""} / ${p.category||""}<br>
+        在庫：<span class="${(p.stock||0)===0?'out':''}">${p.stock||0}</span><br>
         <button onclick="openModal('${p.barcode}')">編集</button>
       </li>
     `);
   });
 }
 
-/* モーダル */
-window.openModal = async barcode=>{
-  currentBarcode=barcode;
-  $("modal").style.display="flex";
-  $("modalBarcode").textContent="バーコード："+barcode;
-
-  const doc=await db.collection("products").doc(barcode).get();
-  const p=doc.exists?doc.data():{};
-  $("modalName").value=p.name||"";
-  $("modalPrice").value=p.latestPrice||0;
-  $("modalRetail").value=p.retailPrice||0;
-  $("modalStock").textContent=p.stock||0;
-};
-
-window.closeModal=()=>{
-  $("modal").style.display="none";
-};
-
-/* 保存のみ */
-window.saveOnly=async()=>{
-  await db.collection("products").doc(currentBarcode).set({
-    barcode:currentBarcode,
-    name:$("modalName").value,
-    latestPrice:+$("modalPrice").value||0,
-    retailPrice:+$("modalRetail").value||0
-  },{merge:true});
-  loadProducts(); closeModal();
-};
-
-/* 在庫処理＋履歴 */
-window.submitStock=async type=>{
-  const qty=+$("modalQty").value||0;
-  if(qty<=0) return alert("数量エラー");
-
-  const ref=db.collection("products").doc(currentBarcode);
-  const doc=await ref.get();
-  let stock=doc.exists?(doc.data().stock||0):0;
-  const before=stock;
-
-  if(type==="in") stock+=qty;
-  else{
-    if(stock<qty) return alert("在庫不足");
-    stock-=qty;
-  }
-
-  await ref.set({stock},{merge:true});
-  await ref.collection("histories").add({
-    type,qty,before,after:stock,
-    createdAt:firebase.firestore.FieldValue.serverTimestamp()
+/* バーコード */
+scanBtn.onclick=()=>{
+  Quagga.init({inputStream:{type:"LiveStream",target:"#scanner"},decoder:{readers:["ean_reader"]}},()=>{
+    Quagga.start();
+    Quagga.offDetected();
+    Quagga.onDetected(d=>{
+      Quagga.stop();
+      openModal(d.codeResult.code);
+    });
   });
-
-  loadProducts(); closeModal();
 };
-
-/* 削除 */
-window.deleteProduct=async()=>{
-  if(confirm("削除しますか？")){
-    await db.collection("products").doc(currentBarcode).delete();
-    loadProducts(); closeModal();
-  }
-};
+function manualBarcodeSet(){
+  if(manualBarcode.value) openModal(manualBarcode.value.trim());
+  manualBarcode.value="";
+}
 
 /* 認証状態 */
 auth.onAuthStateChanged(u=>{
   if(u){
     loginDiv.classList.add("hidden");
     appDiv.classList.remove("hidden");
+    loadMasters();
     loadProducts();
   }
 });
