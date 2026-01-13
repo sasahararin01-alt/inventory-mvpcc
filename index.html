@@ -24,7 +24,6 @@ button { cursor:pointer; }
   background:#fff; padding:15px;
   border-radius:6px; width:95%; max-width:420px;
 }
-.danger { background:#c00; color:#fff; }
 .history { font-size:13px; background:#f7f7f7; padding:6px; margin-top:8px; }
 #scanner { width:100%; height:240px; }
 </style>
@@ -67,6 +66,10 @@ button { cursor:pointer; }
 <p id="modalBarcode"></p>
 
 <input id="modalName" placeholder="商品名">
+
+<!-- 追加：販売価格 -->
+<input id="modalSellPrice" type="number" placeholder="販売価格">
+
 <input id="modalBuyPrice" type="number" placeholder="仕入単価">
 <input id="modalVendor" placeholder="問屋名">
 
@@ -120,26 +123,27 @@ async function openModal(barcode){
   purchaseHistory.innerHTML="";
 
   const ref=db.collection("products").doc(barcode);
+  const prod=await ref.get();
 
-  try {
-    const snap = await ref
-      .collection("purchaseHistory")
-      .orderBy("price","asc")
-      .get();
+  if(prod.exists){
+    const d=prod.data();
+    modalName.value=d.name||"";
+    modalBuyPrice.value=d.lastBuyPrice ?? "";
+    modalVendor.value=d.lastVendor ?? "";
+    modalSellPrice.value=d.sellPrice ?? "";
+  }
 
+  try{
+    const snap=await ref.collection("purchaseHistory").orderBy("price","asc").get();
     snap.forEach(d=>{
       const x=d.data();
-      purchaseHistory.innerHTML +=
-        `${x.vendor}：¥${x.price} ×${x.qty}<br>`;
+      purchaseHistory.innerHTML+=`${x.vendor}：¥${x.price} ×${x.qty}<br>`;
     });
-
-  } catch(e) {
-    // 🔥 iPhone Safari 対策フォールバック
-    const snap = await ref.collection("purchaseHistory").get();
+  }catch{
+    const snap=await ref.collection("purchaseHistory").get();
     snap.forEach(d=>{
       const x=d.data();
-      purchaseHistory.innerHTML +=
-        `${x.vendor}：¥${x.price||"-"} ×${x.qty}<br>`;
+      purchaseHistory.innerHTML+=`${x.vendor}：¥${x.price||"-"} ×${x.qty}<br>`;
     });
   }
 }
@@ -149,18 +153,30 @@ function closeModal(){ modal.style.display="none"; }
 /* 在庫処理 */
 async function submitStock(type){
   const ref=db.collection("products").doc(currentBarcode);
-  const price = Number(modalBuyPrice.value);
-  const vendor = modalVendor.value || "未入力";
-  const qty = Number(modalQty.value);
+
+  const buyPrice=Number(modalBuyPrice.value);
+  const sellPrice=Number(modalSellPrice.value);
+  const vendor=modalVendor.value||"未入力";
+  const qty=Number(modalQty.value);
+
+  // 商品マスタ更新（iPhone反映対策）
+  await ref.set({
+    barcode:currentBarcode,
+    name:modalName.value,
+    lastBuyPrice:isNaN(buyPrice)?0:buyPrice,
+    lastVendor:vendor,
+    sellPrice:isNaN(sellPrice)?0:sellPrice
+  },{merge:true});
 
   if(type==="in"){
     await ref.collection("purchaseHistory").add({
-      price: isNaN(price) ? 0 : price, // ← 数値保証
+      price:isNaN(buyPrice)?0:buyPrice,
       vendor,
       qty,
-      time: Date.now()
+      time:Date.now()
     });
   }
+
   closeModal();
 }
 
@@ -172,7 +188,8 @@ async function loadProducts(){
     const p=d.data();
     productList.innerHTML+=`
       <li class="product">
-        ${p.barcode}
+        ${p.name||"(未入力)"}<br>
+        ¥${p.sellPrice||0}<br>
         <button onclick="openModal('${p.barcode}')">編集</button>
       </li>`;
   });
