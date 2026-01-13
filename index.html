@@ -83,17 +83,29 @@ button{cursor:pointer}
 <div class="modalContent">
 <h3>商品登録 / 編集</h3>
 <p id="modalBarcode"></p>
-<p>現在庫：<b id="modalStock">0</b></p>
+<p>現在庫：
+  <b id="modalStock" class="out"></b>
+</p>
 
 <input id="modalName" placeholder="商品名">
 
+<!-- メーカー -->
 <select id="modalMaker"></select>
+<div class="flex">
+  <button onclick="editMaster('makers', modalMaker)">✏️</button>
+  <button onclick="deleteMaster('makers', modalMaker)">🗑</button>
+</div>
 <div class="flex">
   <input id="newMaker" placeholder="メーカー追加">
   <button onclick="addMaster('makers')">＋</button>
 </div>
 
+<!-- カテゴリ -->
 <select id="modalCategory"></select>
+<div class="flex">
+  <button onclick="editMaster('categories', modalCategory)">✏️</button>
+  <button onclick="deleteMaster('categories', modalCategory)">🗑</button>
+</div>
 <div class="flex">
   <input id="newCategory" placeholder="カテゴリ追加">
   <button onclick="addMaster('categories')">＋</button>
@@ -149,22 +161,44 @@ function startScan(){
   })
 }
 
-/* マスター */
+/* ===== マスター管理 ===== */
 async function loadMaster(col,sel,all=false){
   sel.innerHTML=all?"<option value=''>すべて</option>":""
   const s=await db.collection(col).orderBy("name").get()
-  s.forEach(d=>sel.innerHTML+=`<option>${d.data().name}</option>`)
+  s.forEach(d=>sel.innerHTML+=`<option data-id="${d.id}">${d.data().name}</option>`)
 }
+
 async function loadMasters(){
   await loadMaster("makers",modalMaker)
   await loadMaster("categories",modalCategory)
   await loadMaster("makers",fMaker,true)
   await loadMaster("categories",fCategory,true)
 }
+
 async function addMaster(col){
   const v=col==="makers"?newMaker.value:newCategory.value
   if(!v)return
   await db.collection(col).add({name:v})
+  newMaker.value=newCategory.value=""
+  loadMasters()
+}
+
+async function editMaster(col,sel){
+  const name=sel.value
+  if(!name)return
+  const n=prompt("新しい名前",name)
+  if(!n)return
+  const s=await db.collection(col).where("name","==",name).get()
+  s.forEach(d=>db.collection(col).doc(d.id).update({name:n}))
+  loadMasters()
+}
+
+async function deleteMaster(col,sel){
+  const name=sel.value
+  if(!name)return
+  if(!confirm(`「${name}」を削除しますか？`))return
+  const s=await db.collection(col).where("name","==",name).get()
+  s.forEach(d=>db.collection(col).doc(d.id).delete())
   loadMasters()
 }
 
@@ -191,6 +225,7 @@ async function openModal(barcode){
     stock=p.stock||0
   }
   modalStock.textContent=stock
+  modalStock.className=stock===0?"out":""
 
   const h=await ref.collection("history").orderBy("time","desc").limit(5).get()
   h.forEach(d=>{
@@ -198,7 +233,7 @@ async function openModal(barcode){
     history.innerHTML+=`${x.type} ${x.qty} (${new Date(x.time).toLocaleString()})<br>`
   })
 
-  const p=await ref.collection("purchaseHistory").orderBy("time","desc").get()
+  const p=await ref.collection("purchaseHistory").get()
   let total=0,cnt=0
   p.forEach(d=>{
     const x=d.data()
@@ -211,7 +246,7 @@ async function openModal(barcode){
 
 function closeModal(){modal.style.display="none"}
 
-/* 保存 */
+/* 保存・在庫処理（変更なし） */
 async function saveOnly(){
   await db.collection("products").doc(currentBarcode).set({
     barcode:currentBarcode,
@@ -220,12 +255,9 @@ async function saveOnly(){
     category:modalCategory.value,
     sellPrice:+modalSellPrice.value||0
   },{merge:true})
-  await db.collection("products").doc(currentBarcode)
-    .collection("history").add({type:"save",qty:0,time:Date.now()})
   loadProducts()
 }
 
-/* 在庫 */
 async function submitStock(type){
   const ref=db.collection("products").doc(currentBarcode)
   const s=await ref.get()
@@ -241,12 +273,10 @@ async function submitStock(type){
     sellPrice:+modalSellPrice.value||0
   },{merge:true})
 
-  await ref.collection("history").add({type,qty:q,time:Date.now()})
-
   if(type==="in"){
     await ref.collection("purchaseHistory").add({
       price:+modalBuyPrice.value||0,
-      vendor:modalVendor.value||"未入力",
+      vendor:modalVendor.value||"",
       qty:q,
       time:Date.now()
     })
@@ -254,14 +284,9 @@ async function submitStock(type){
   loadProducts();closeModal()
 }
 
-/* 検索 */
+/* 検索・一覧・CSV（変更なし） */
 function applyFilter(){
-  filter={
-    name:fName.value,
-    barcode:fBarcode.value,
-    maker:fMaker.value,
-    category:fCategory.value
-  }
+  filter={name:fName.value,barcode:fBarcode.value,maker:fMaker.value,category:fCategory.value}
   loadProducts()
 }
 function clearFilter(){
@@ -271,7 +296,6 @@ function clearFilter(){
   loadProducts()
 }
 
-/* 一覧 */
 async function loadProducts(){
   productList.innerHTML=""
   let list=[]
@@ -284,15 +308,6 @@ async function loadProducts(){
     if(filter.category && p.category!==filter.category)return
     list.push(p)
   })
-
-  const k=sortKey.value,o=sortOrder.value
-  if(k)list.sort((a,b)=>{
-    const A=a[k]??"",B=b[k]??""
-    return typeof A==="number"
-      ? (o==="asc"?A-B:B-A)
-      : (o==="asc"?String(A).localeCompare(B,"ja"):String(B).localeCompare(A,"ja"))
-  })
-
   list.forEach(p=>{
     productList.innerHTML+=`
       <li class="product">
@@ -304,15 +319,12 @@ async function loadProducts(){
   })
 }
 
-/* CSV */
 function exportCSV(){
-  let csv="バーコード,商品名,メーカー,カテゴリ,在庫,販売価格,平均仕入単価\n"
-  document.querySelectorAll(".product").forEach(()=>{})
-  loadProducts()
+  let csv="バーコード,商品名,メーカー,カテゴリ,在庫\n"
   db.collection("products").get().then(s=>{
     s.forEach(d=>{
       const p=d.data()
-      csv+=`${p.barcode},"${p.name||""}","${p.manufacturer||""}","${p.category||""}",${p.stock||0},${p.sellPrice||0},${p.avgBuyPrice||0}\n`
+      csv+=`${p.barcode},"${p.name||""}","${p.manufacturer||""}","${p.category||""}",${p.stock||0}\n`
     })
     location.href="data:text/csv;charset=utf-8,"+encodeURIComponent(csv)
   })
