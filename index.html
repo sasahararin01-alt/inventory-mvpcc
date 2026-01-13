@@ -29,11 +29,13 @@ button { cursor:pointer; }
 .danger { background:#c00; color:#fff; }
 .stockView { font-weight:bold; margin-bottom:8px; }
 .history { font-size:13px; background:#f7f7f7; padding:6px; margin-top:8px; }
+#scanner { width:100%; height:240px; }
 </style>
 
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="https://unpkg.com/quagga@0.12.1/dist/quagga.min.js"></script>
 </head>
 
 <body>
@@ -49,6 +51,10 @@ button { cursor:pointer; }
 
 <div id="appDiv" class="hidden">
 <button onclick="logout()">ログアウト</button>
+
+<hr>
+<button onclick="startScan()">📷 バーコードを読む</button>
+<div id="scanner"></div>
 
 <hr>
 <input id="manualBarcode" placeholder="バーコード">
@@ -95,6 +101,10 @@ button { cursor:pointer; }
 <select id="modalMaker"></select>
 <select id="modalCategory"></select>
 
+<!-- ★ 価格入力を復活 -->
+<input id="modalBuyPrice" type="number" placeholder="仕入価格">
+<input id="modalSellPrice" type="number" placeholder="販売価格">
+
 <input id="modalQty" type="number" min="1" value="1">
 <button onclick="submitStock('in')">仕入</button>
 <button onclick="submitStock('out')">販売</button>
@@ -139,6 +149,21 @@ async function loadMasters(){
   await loadMaster("categories",fCategory,true);
 }
 
+/* バーコードスキャン */
+function startScan(){
+  scanner.innerHTML="";
+  Quagga.init({
+    inputStream:{ type:"LiveStream", target:scanner, constraints:{ facingMode:"environment" }},
+    decoder:{ readers:["ean_reader","ean_8_reader","code_128_reader"] }
+  },()=>{
+    Quagga.start();
+    Quagga.onDetected(d=>{
+      Quagga.stop();
+      openModal(d.codeResult.code);
+    });
+  });
+}
+
 /* モーダル */
 async function openModal(barcode){
   if(!barcode) return;
@@ -148,6 +173,8 @@ async function openModal(barcode){
   modalName.value="";
   modalQty.value=1;
   modalStock.textContent="0";
+  modalBuyPrice.value="";
+  modalSellPrice.value="";
   history.innerHTML="";
 
   await loadMasters();
@@ -159,6 +186,8 @@ async function openModal(barcode){
     modalMaker.value=p.manufacturer||"";
     modalCategory.value=p.category||"";
     modalStock.textContent=p.stock||0;
+    modalBuyPrice.value=p.buyPrice||"";
+    modalSellPrice.value=p.sellPrice||"";
   }
 
   const h=await ref.collection("history").orderBy("time","desc").limit(10).get();
@@ -175,7 +204,9 @@ async function saveOnly(){
     barcode:currentBarcode,
     name:modalName.value,
     manufacturer:modalMaker.value,
-    category:modalCategory.value
+    category:modalCategory.value,
+    buyPrice:+modalBuyPrice.value||0,
+    sellPrice:+modalSellPrice.value||0
   },{merge:true});
   loadProducts(); closeModal();
 }
@@ -191,9 +222,7 @@ async function submitStock(type){
   stock += (type==="in"?q:-q);
 
   await ref.set({stock},{merge:true});
-  await ref.collection("history").add({
-    type, qty:q, time:Date.now()
-  });
+  await ref.collection("history").add({type,qty:q,time:Date.now()});
 
   loadProducts(); closeModal();
 }
@@ -206,7 +235,7 @@ async function deleteProduct(){
   }
 }
 
-/* 一覧 + 並び替え */
+/* 一覧 */
 async function loadProducts(){
   productList.innerHTML="";
   products=[];
@@ -253,9 +282,9 @@ function clearFilter(){
 
 /* CSV */
 function exportCSV(){
-  let csv="バーコード,商品名,メーカー,カテゴリ,在庫\n";
+  let csv="バーコード,商品名,メーカー,カテゴリ,在庫,仕入価格,販売価格\n";
   products.forEach(p=>{
-    csv+=`${p.barcode},"${p.name||""}","${p.manufacturer||""}","${p.category||""}",${p.stock||0}\n`;
+    csv+=`${p.barcode},"${p.name||""}","${p.manufacturer||""}","${p.category||""}",${p.stock||0},${p.buyPrice||0},${p.sellPrice||0}\n`;
   });
   location.href="data:text/csv;charset=utf-8,"+encodeURIComponent(csv);
 }
