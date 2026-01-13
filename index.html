@@ -3,8 +3,9 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>在庫管理アプリ（iPhone / Android 完全安定版）</title>
+<title>在庫管理アプリ（iPhone / Android 完全版）</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
 <style>
 body{font-family:sans-serif;padding:10px}
 .hidden{display:none}
@@ -12,11 +13,17 @@ body{font-family:sans-serif;padding:10px}
 .out{color:red;font-weight:bold}
 input,select,button{width:100%;font-size:16px;padding:6px;margin-bottom:6px}
 button{cursor:pointer}
+.modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);justify-content:center;align-items:center}
+.modalContent{background:#fff;padding:15px;border-radius:6px;width:95%;max-width:420px}
+.flex{display:flex;gap:6px}
+.history{font-size:13px;background:#f7f7f7;padding:6px;margin-top:6px}
+#scanner{width:100%;height:240px}
 </style>
 
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="https://unpkg.com/quagga@0.12.1/dist/quagga.min.js"></script>
 </head>
 
 <body>
@@ -33,8 +40,12 @@ button{cursor:pointer}
 <button onclick="logout()">ログアウト</button>
 
 <hr>
+<button onclick="startScan()">📷 バーコード読み取り</button>
+<div id="scanner"></div>
+
+<hr>
 <input id="manualBarcode" placeholder="バーコード手入力">
-<button onclick="openModal(document.getElementById('manualBarcode').value)">開く</button>
+<button onclick="openModal(manualBarcode.value)">開く</button>
 
 <hr>
 <h4>🔍 絞り込み検索</h4>
@@ -54,7 +65,7 @@ button{cursor:pointer}
   <option value="">なし</option>
   <option value="name">商品名</option>
   <option value="stock">在庫数</option>
-  <option value="avgBuyPrice">仕入れ金額</option>
+  <option value="avgBuyPrice">仕入金額</option>
   <option value="barcode">バーコード</option>
 </select>
 <select id="sortOrder">
@@ -67,6 +78,45 @@ button{cursor:pointer}
 <ul id="productList"></ul>
 </div>
 
+<!-- モーダル -->
+<div id="modal" class="modal">
+<div class="modalContent">
+<h3>商品登録 / 編集</h3>
+<p id="mBarcode"></p>
+<p>現在庫：<b id="mStock"></b></p>
+
+<input id="mName" placeholder="商品名">
+
+<select id="mMaker"></select>
+<div class="flex">
+<button onclick="editMaster('makers',mMaker)">✏️</button>
+<button onclick="deleteMaster('makers',mMaker)">🗑</button>
+</div>
+<input id="newMaker" placeholder="メーカー追加">
+<button onclick="addMaster('makers')">＋</button>
+
+<select id="mCategory"></select>
+<div class="flex">
+<button onclick="editMaster('categories',mCategory)">✏️</button>
+<button onclick="deleteMaster('categories',mCategory)">🗑</button>
+</div>
+<input id="newCategory" placeholder="カテゴリ追加">
+<button onclick="addMaster('categories')">＋</button>
+
+<input id="mSell" type="number" placeholder="販売価格">
+<input id="mBuy" type="number" placeholder="今回仕入単価">
+<p>平均仕入単価：<b id="mAvg">0</b></p>
+<input id="mVendor" placeholder="今回仕入問屋">
+<input id="mQty" type="number" value="1" min="1">
+
+<button onclick="saveOnly()">💾 保存</button>
+<button onclick="stockAction('in')">📥 仕入</button>
+<button onclick="stockAction('out')">📤 販売</button>
+<button onclick="stockAction('use')">🧴 使用</button>
+<button onclick="closeModal()">❌ キャンセル</button>
+</div>
+</div>
+
 <script>
 firebase.initializeApp({
   apiKey:"AIzaSyCaFkgFPGtYN0GJdo-20mRHJqLLOfsaAFI",
@@ -75,34 +125,129 @@ firebase.initializeApp({
 })
 
 const auth=firebase.auth(),db=firebase.firestore()
-
-const el = id => document.getElementById(id)
-
-let makerMap={}, categoryMap={}, filter={}
+const el=id=>document.getElementById(id)
+let currentBarcode=null, makerMap={}, categoryMap={}, filter={}
 
 /* 認証 */
 function login(){auth.signInWithEmailAndPassword(el('email').value,el('password').value)}
 function signup(){auth.createUserWithEmailAndPassword(el('email').value,el('password').value)}
 function logout(){auth.signOut()}
 
-/* マスター */
-async function loadMaster(col,sel,all=false){
-  sel.innerHTML = all ? `<option value="">すべて</option>` : ``
-  const s=await db.collection(col).orderBy("name").get()
-  s.forEach(d=>{
-    sel.innerHTML+=`<option value="${d.id}">${d.data().name}</option>`
-    if(col==="makers") makerMap[d.id]=d.data().name
-    if(col==="categories") categoryMap[d.id]=d.data().name
+/* バーコード */
+function startScan(){
+  el('scanner').innerHTML=""
+  Quagga.init({
+    inputStream:{type:"LiveStream",target:el('scanner'),constraints:{facingMode:"environment"}},
+    decoder:{readers:["ean_reader","code_128_reader"]}
+  },()=>{
+    Quagga.start()
+    Quagga.onDetected(d=>{
+      Quagga.stop()
+      openModal(d.codeResult.code)
+    })
   })
 }
 
+/* マスター */
+async function loadMaster(col,sel,all){
+  sel.innerHTML=all?'<option value="">すべて</option>':''
+  const s=await db.collection(col).orderBy("name").get()
+  s.forEach(d=>{
+    sel.innerHTML+=`<option value="${d.id}">${d.data().name}</option>`
+    if(col==="makers")makerMap[d.id]=d.data().name
+    if(col==="categories")categoryMap[d.id]=d.data().name
+  })
+}
 async function loadMasters(){
-  makerMap={}; categoryMap={}
+  makerMap={};categoryMap={}
   await loadMaster("makers",el('fMaker'),true)
   await loadMaster("categories",el('fCategory'),true)
+  await loadMaster("makers",el('mMaker'))
+  await loadMaster("categories",el('mCategory'))
+}
+async function addMaster(col){
+  const v=el(col==="makers"?'newMaker':'newCategory').value
+  if(!v)return
+  await db.collection(col).add({name:v})
+  loadMasters()
+}
+async function editMaster(col,sel){
+  const id=sel.value;if(!id)return
+  const d=await db.collection(col).doc(id).get()
+  const n=prompt("新名称",d.data().name)
+  if(n) await db.collection(col).doc(id).update({name:n})
+  loadMasters()
+}
+async function deleteMaster(col,sel){
+  const id=sel.value;if(!id)return
+  if(confirm("削除しますか？")) await db.collection(col).doc(id).delete()
+  loadMasters()
 }
 
-/* 絞り込み */
+/* モーダル */
+async function openModal(barcode){
+  if(!barcode)return
+  currentBarcode=barcode
+  el('modal').style.display="flex"
+  el('mBarcode').textContent="バーコード："+barcode
+  el('mQty').value=1
+  await loadMasters()
+
+  const ref=db.collection("products").doc(barcode)
+  const s=await ref.get()
+  let stock=0
+  if(s.exists){
+    const p=s.data()
+    el('mName').value=p.name||""
+    el('mMaker').value=p.manufacturerId||""
+    el('mCategory').value=p.categoryId||""
+    el('mSell').value=p.sellPrice||0
+    el('mAvg').textContent=p.avgBuyPrice||0
+    stock=p.stock||0
+  }
+  el('mStock').textContent=stock
+}
+function closeModal(){el('modal').style.display="none"}
+
+/* 保存 */
+async function saveOnly(){
+  await db.collection("products").doc(currentBarcode).set({
+    barcode:currentBarcode,
+    name:el('mName').value,
+    manufacturerId:el('mMaker').value,
+    categoryId:el('mCategory').value,
+    sellPrice:+el('mSell').value||0
+  },{merge:true})
+  loadProducts()
+}
+
+/* 在庫 */
+async function stockAction(type){
+  const ref=db.collection("products").doc(currentBarcode)
+  const s=await ref.get()
+  let stock=s.exists?(s.data().stock||0):0
+  const q=+el('mQty').value
+  if(type!=="in"&&stock<q)return alert("在庫不足")
+  stock+=type==="in"?q:-q
+
+  let total=s.exists?(s.data().totalBuy||0):0
+  let cnt=s.exists?(s.data().totalQty||0):0
+  if(type==="in"){
+    total+=q*(+el('mBuy').value||0)
+    cnt+=q
+  }
+
+  await ref.set({
+    stock,
+    totalBuy:total,
+    totalQty:cnt,
+    avgBuyPrice:cnt?Math.round(total/cnt):0
+  },{merge:true})
+
+  closeModal();loadProducts()
+}
+
+/* フィルタ */
 function applyFilter(){
   filter={
     name:el('fName').value,
@@ -112,13 +257,10 @@ function applyFilter(){
   }
   loadProducts()
 }
-
 function clearFilter(){
   filter={}
-  el('fName').value=""
-  el('fBarcode').value=""
-  el('fMaker').value=""
-  el('fCategory').value=""
+  el('fName').value=el('fBarcode').value=""
+  el('fMaker').value=el('fCategory').value=""
   loadProducts()
 }
 
@@ -136,8 +278,7 @@ async function loadProducts(){
     list.push(p)
   })
 
-  const k=el('sortKey').value
-  const o=el('sortOrder').value
+  const k=el('sortKey').value,o=el('sortOrder').value
   if(k){
     list.sort((a,b)=>{
       const A=a[k]??"",B=b[k]??""
@@ -152,20 +293,18 @@ async function loadProducts(){
       <li class="product">
         <b>${p.name||"(未入力)"}</b><br>
         ${p.barcode}<br>
-        メーカー：${makerMap[p.manufacturerId]||"-"}<br>
-        カテゴリ：${categoryMap[p.categoryId]||"-"}<br>
         在庫：<span class="${p.stock==0?'out':''}">${p.stock||0}</span>
       </li>`
   })
 }
 
-/* CSV（iOS対応） */
+/* CSV */
 function exportCSV(){
-  let csv="バーコード,商品名,メーカー,カテゴリ,在庫,仕入れ金額\n"
+  let csv="バーコード,商品名,在庫,平均仕入\n"
   db.collection("products").get().then(s=>{
     s.forEach(d=>{
       const p=d.data()
-      csv+=`${p.barcode},"${p.name||""}","${makerMap[p.manufacturerId]||""}","${categoryMap[p.categoryId]||""}",${p.stock||0},${p.avgBuyPrice||0}\n`
+      csv+=`${p.barcode},"${p.name||""}",${p.stock||0},${p.avgBuyPrice||0}\n`
     })
     const blob=new Blob([csv],{type:"text/csv"})
     const a=document.createElement("a")
