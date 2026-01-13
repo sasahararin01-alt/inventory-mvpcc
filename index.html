@@ -3,29 +3,21 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>在庫管理アプリ（iPhone / Android 完全版）</title>
+<title>在庫管理アプリ（完全版）</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <style>
-body { font-family:sans-serif; padding:10px; }
-.hidden { display:none; }
-.product { border-bottom:1px solid #ccc; padding:10px 0; }
-.out { color:red; font-weight:bold; }
-input, button {
-  width:100%; font-size:16px; padding:6px; margin-bottom:6px;
-}
-button { cursor:pointer; }
-.modal {
-  display:none; position:fixed; inset:0;
-  background:rgba(0,0,0,0.6);
-  justify-content:center; align-items:center;
-}
-.modalContent {
-  background:#fff; padding:15px;
-  border-radius:6px; width:95%; max-width:420px;
-}
-.history { font-size:13px; background:#f7f7f7; padding:6px; margin-top:8px; }
-#scanner { width:100%; height:240px; }
+body{font-family:sans-serif;padding:10px}
+.hidden{display:none}
+.product{border-bottom:1px solid #ccc;padding:8px}
+.out{color:red;font-weight:bold}
+input,select,button{width:100%;font-size:16px;padding:6px;margin-bottom:6px}
+button{cursor:pointer}
+.modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);justify-content:center;align-items:center}
+.modalContent{background:#fff;padding:15px;border-radius:6px;width:95%;max-width:420px}
+.flex{display:flex;gap:6px}
+.history{font-size:13px;background:#f7f7f7;padding:6px;margin-top:6px}
+#scanner{width:100%;height:240px}
 </style>
 
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
@@ -35,51 +27,95 @@ button { cursor:pointer; }
 </head>
 
 <body>
-<h1>在庫管理アプリ</h1>
+<h2>在庫管理アプリ</h2>
 
 <div id="loginDiv">
   <input id="email" placeholder="メール">
   <input id="password" type="password" placeholder="パスワード">
   <button onclick="login()">ログイン</button>
   <button onclick="signup()">新規登録</button>
-  <p id="loginMsg" style="color:red;"></p>
 </div>
 
 <div id="appDiv" class="hidden">
 <button onclick="logout()">ログアウト</button>
 
 <hr>
-<button onclick="startScan()">📷 バーコードを読む</button>
+<button onclick="startScan()">📷 バーコード読み取り</button>
 <div id="scanner"></div>
 
 <hr>
-<input id="manualBarcode" placeholder="バーコード">
+<input id="manualBarcode" placeholder="バーコード手入力">
 <button onclick="openModal(manualBarcode.value)">開く</button>
+
+<hr>
+<h4>🔍 絞り込み検索</h4>
+<input id="fName" placeholder="商品名">
+<input id="fBarcode" placeholder="バーコード">
+<select id="fMaker"></select>
+<select id="fCategory"></select>
+<button onclick="applyFilter()">検索</button>
+<button onclick="clearFilter()">解除</button>
+
+<hr>
+<button onclick="exportCSV()">📄 CSV出力</button>
+
+<hr>
+<h4>↕ 並び替え</h4>
+<select id="sortKey">
+  <option value="">なし</option>
+  <option value="name">商品名</option>
+  <option value="stock">在庫数</option>
+  <option value="avgBuyPrice">平均仕入単価</option>
+  <option value="barcode">バーコード</option>
+</select>
+<select id="sortOrder">
+  <option value="asc">昇順</option>
+  <option value="desc">降順</option>
+</select>
+<button onclick="loadProducts()">並び替え</button>
 
 <hr>
 <ul id="productList"></ul>
 </div>
 
+<!-- モーダル -->
 <div id="modal" class="modal">
 <div class="modalContent">
 <h3>商品登録 / 編集</h3>
 <p id="modalBarcode"></p>
+<p>現在庫：<b id="modalStock">0</b></p>
 
 <input id="modalName" placeholder="商品名">
 
-<!-- 追加：販売価格 -->
+<select id="modalMaker"></select>
+<div class="flex">
+  <input id="newMaker" placeholder="メーカー追加">
+  <button onclick="addMaster('makers')">＋</button>
+</div>
+
+<select id="modalCategory"></select>
+<div class="flex">
+  <input id="newCategory" placeholder="カテゴリ追加">
+  <button onclick="addMaster('categories')">＋</button>
+</div>
+
 <input id="modalSellPrice" type="number" placeholder="販売価格">
+<input id="modalBuyPrice" type="number" placeholder="今回仕入れ単価">
+<p>平均仕入単価：<b id="avgBuy">0</b></p>
 
-<input id="modalBuyPrice" type="number" placeholder="仕入単価">
-<input id="modalVendor" placeholder="問屋名">
-
+<input id="modalVendor" placeholder="今回仕入れ問屋">
 <input id="modalQty" type="number" min="1" value="1">
-<button onclick="submitStock('in')">仕入</button>
-<button onclick="submitStock('out')">販売</button>
 
-<button onclick="closeModal()">閉じる</button>
+<button onclick="saveOnly()">💾 保存</button>
+<button onclick="submitStock('in')">📥 仕入れ</button>
+<button onclick="submitStock('out')">📤 販売</button>
+<button onclick="submitStock('use')">🧴 使用</button>
+<button onclick="closeModal()">❌ キャンセル</button>
 
-<h4>📦 仕入れ履歴（安い順）</h4>
+<h4>📦 在庫履歴</h4>
+<div id="history" class="history"></div>
+
+<h4>💰 仕入れ履歴</h4>
 <div id="purchaseHistory" class="history"></div>
 </div>
 </div>
@@ -90,118 +126,206 @@ firebase.initializeApp({
   authDomain:"inventory-mvpcc.firebaseapp.com",
   projectId:"inventory-mvpcc"
 });
-
-const auth=firebase.auth();
-const db=firebase.firestore();
-let currentBarcode=null;
+const auth=firebase.auth(),db=firebase.firestore();
+let currentBarcode=null,filter={};
 
 /* 認証 */
-function login(){auth.signInWithEmailAndPassword(email.value,password.value).catch(e=>loginMsg.textContent=e.message);}
-function signup(){auth.createUserWithEmailAndPassword(email.value,password.value).catch(e=>loginMsg.textContent=e.message);}
-function logout(){auth.signOut();}
+function login(){auth.signInWithEmailAndPassword(email.value,password.value)}
+function signup(){auth.createUserWithEmailAndPassword(email.value,password.value)}
+function logout(){auth.signOut()}
 
 /* スキャン */
 function startScan(){
+  scanner.innerHTML=""
   Quagga.init({
     inputStream:{type:"LiveStream",target:scanner,constraints:{facingMode:"environment"}},
-    decoder:{readers:["ean_reader","code_128_reader"]}
+    decoder:{readers:["ean_reader","ean_8_reader","code_128_reader"]}
   },()=>{
-    Quagga.start();
+    Quagga.start()
     Quagga.onDetected(d=>{
-      Quagga.stop();
-      openModal(d.codeResult.code);
-    });
-  });
+      Quagga.stop()
+      openModal(d.codeResult.code)
+    })
+  })
+}
+
+/* マスター */
+async function loadMaster(col,sel,all=false){
+  sel.innerHTML=all?"<option value=''>すべて</option>":""
+  const s=await db.collection(col).orderBy("name").get()
+  s.forEach(d=>sel.innerHTML+=`<option>${d.data().name}</option>`)
+}
+async function loadMasters(){
+  await loadMaster("makers",modalMaker)
+  await loadMaster("categories",modalCategory)
+  await loadMaster("makers",fMaker,true)
+  await loadMaster("categories",fCategory,true)
+}
+async function addMaster(col){
+  const v=col==="makers"?newMaker.value:newCategory.value
+  if(!v)return
+  await db.collection(col).add({name:v})
+  loadMasters()
 }
 
 /* モーダル */
 async function openModal(barcode){
-  if(!barcode) return;
-  currentBarcode=barcode;
-  modal.style.display="flex";
-  modalBarcode.textContent="バーコード："+barcode;
-  purchaseHistory.innerHTML="";
+  if(!barcode)return
+  currentBarcode=barcode
+  modal.style.display="flex"
+  modalBarcode.textContent="バーコード："+barcode
+  history.innerHTML=purchaseHistory.innerHTML=""
+  modalQty.value=1
+  await loadMasters()
 
-  const ref=db.collection("products").doc(barcode);
-  const prod=await ref.get();
-
-  if(prod.exists){
-    const d=prod.data();
-    modalName.value=d.name||"";
-    modalBuyPrice.value=d.lastBuyPrice ?? "";
-    modalVendor.value=d.lastVendor ?? "";
-    modalSellPrice.value=d.sellPrice ?? "";
+  const ref=db.collection("products").doc(barcode)
+  const s=await ref.get()
+  let stock=0
+  if(s.exists){
+    const p=s.data()
+    modalName.value=p.name||""
+    modalMaker.value=p.manufacturer||""
+    modalCategory.value=p.category||""
+    modalSellPrice.value=p.sellPrice||0
+    avgBuy.textContent=p.avgBuyPrice||0
+    stock=p.stock||0
   }
+  modalStock.textContent=stock
 
-  try{
-    const snap=await ref.collection("purchaseHistory").orderBy("price","asc").get();
-    snap.forEach(d=>{
-      const x=d.data();
-      purchaseHistory.innerHTML+=`${x.vendor}：¥${x.price} ×${x.qty}<br>`;
-    });
-  }catch{
-    const snap=await ref.collection("purchaseHistory").get();
-    snap.forEach(d=>{
-      const x=d.data();
-      purchaseHistory.innerHTML+=`${x.vendor}：¥${x.price||"-"} ×${x.qty}<br>`;
-    });
-  }
+  const h=await ref.collection("history").orderBy("time","desc").limit(5).get()
+  h.forEach(d=>{
+    const x=d.data()
+    history.innerHTML+=`${x.type} ${x.qty} (${new Date(x.time).toLocaleString()})<br>`
+  })
+
+  const p=await ref.collection("purchaseHistory").orderBy("time","desc").get()
+  let total=0,cnt=0
+  p.forEach(d=>{
+    const x=d.data()
+    total+=x.price*x.qty
+    cnt+=x.qty
+    purchaseHistory.innerHTML+=`${x.vendor} ¥${x.price} ×${x.qty}<br>`
+  })
+  if(cnt>0)avgBuy.textContent=Math.round(total/cnt)
 }
 
-function closeModal(){ modal.style.display="none"; }
+function closeModal(){modal.style.display="none"}
 
-/* 在庫処理 */
-async function submitStock(type){
-  const ref=db.collection("products").doc(currentBarcode);
-
-  const buyPrice=Number(modalBuyPrice.value);
-  const sellPrice=Number(modalSellPrice.value);
-  const vendor=modalVendor.value||"未入力";
-  const qty=Number(modalQty.value);
-
-  // 商品マスタ更新（iPhone反映対策）
-  await ref.set({
+/* 保存 */
+async function saveOnly(){
+  await db.collection("products").doc(currentBarcode).set({
     barcode:currentBarcode,
     name:modalName.value,
-    lastBuyPrice:isNaN(buyPrice)?0:buyPrice,
-    lastVendor:vendor,
-    sellPrice:isNaN(sellPrice)?0:sellPrice
-  },{merge:true});
+    manufacturer:modalMaker.value,
+    category:modalCategory.value,
+    sellPrice:+modalSellPrice.value||0
+  },{merge:true})
+  await db.collection("products").doc(currentBarcode)
+    .collection("history").add({type:"save",qty:0,time:Date.now()})
+  loadProducts()
+}
+
+/* 在庫 */
+async function submitStock(type){
+  const ref=db.collection("products").doc(currentBarcode)
+  const s=await ref.get()
+  let stock=s.exists?(s.data().stock||0):0
+  const q=+modalQty.value
+  if(type!=="in" && stock<q)return alert("在庫不足")
+  stock+=type==="in"?q:-q
+
+  await ref.set({
+    stock,
+    manufacturer:modalMaker.value,
+    category:modalCategory.value,
+    sellPrice:+modalSellPrice.value||0
+  },{merge:true})
+
+  await ref.collection("history").add({type,qty:q,time:Date.now()})
 
   if(type==="in"){
     await ref.collection("purchaseHistory").add({
-      price:isNaN(buyPrice)?0:buyPrice,
-      vendor,
-      qty,
+      price:+modalBuyPrice.value||0,
+      vendor:modalVendor.value||"未入力",
+      qty:q,
       time:Date.now()
-    });
+    })
   }
+  loadProducts();closeModal()
+}
 
-  closeModal();
+/* 検索 */
+function applyFilter(){
+  filter={
+    name:fName.value,
+    barcode:fBarcode.value,
+    maker:fMaker.value,
+    category:fCategory.value
+  }
+  loadProducts()
+}
+function clearFilter(){
+  filter={}
+  fName.value=fBarcode.value=""
+  fMaker.value=fCategory.value=""
+  loadProducts()
 }
 
 /* 一覧 */
 async function loadProducts(){
-  productList.innerHTML="";
-  const s=await db.collection("products").get();
+  productList.innerHTML=""
+  let list=[]
+  const s=await db.collection("products").get()
   s.forEach(d=>{
-    const p=d.data();
+    const p=d.data()
+    if(filter.name && !p.name?.includes(filter.name))return
+    if(filter.barcode && !p.barcode?.includes(filter.barcode))return
+    if(filter.maker && p.manufacturer!==filter.maker)return
+    if(filter.category && p.category!==filter.category)return
+    list.push(p)
+  })
+
+  const k=sortKey.value,o=sortOrder.value
+  if(k)list.sort((a,b)=>{
+    const A=a[k]??"",B=b[k]??""
+    return typeof A==="number"
+      ? (o==="asc"?A-B:B-A)
+      : (o==="asc"?String(A).localeCompare(B,"ja"):String(B).localeCompare(A,"ja"))
+  })
+
+  list.forEach(p=>{
     productList.innerHTML+=`
       <li class="product">
-        ${p.name||"(未入力)"}<br>
-        ¥${p.sellPrice||0}<br>
+        <b>${p.name||"(未入力)"}</b><br>
+        ${p.barcode}<br>
+        在庫：<span class="${p.stock==0?'out':''}">${p.stock||0}</span><br>
         <button onclick="openModal('${p.barcode}')">編集</button>
-      </li>`;
-  });
+      </li>`
+  })
+}
+
+/* CSV */
+function exportCSV(){
+  let csv="バーコード,商品名,メーカー,カテゴリ,在庫,販売価格,平均仕入単価\n"
+  document.querySelectorAll(".product").forEach(()=>{})
+  loadProducts()
+  db.collection("products").get().then(s=>{
+    s.forEach(d=>{
+      const p=d.data()
+      csv+=`${p.barcode},"${p.name||""}","${p.manufacturer||""}","${p.category||""}",${p.stock||0},${p.sellPrice||0},${p.avgBuyPrice||0}\n`
+    })
+    location.href="data:text/csv;charset=utf-8,"+encodeURIComponent(csv)
+  })
 }
 
 auth.onAuthStateChanged(u=>{
   if(u){
-    loginDiv.classList.add("hidden");
-    appDiv.classList.remove("hidden");
-    loadProducts();
+    loginDiv.classList.add("hidden")
+    appDiv.classList.remove("hidden")
+    loadMasters()
+    loadProducts()
   }
-});
+})
 </script>
 </body>
 </html>
