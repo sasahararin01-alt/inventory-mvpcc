@@ -11,12 +11,37 @@ body{font-family:sans-serif;padding:10px}
 .hidden{display:none}
 .product{border-bottom:1px solid #ccc;padding:8px}
 .out{color:red;font-weight:bold}
-input,select,button{width:100%;font-size:16px;padding:6px;margin-bottom:6px}
+input,select,button{
+  width:100%;
+  font-size:16px;
+  padding:8px;
+  margin-bottom:6px;
+}
 button{cursor:pointer}
-.modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);justify-content:center;align-items:center}
-.modalContent{background:#fff;padding:15px;border-radius:6px;width:95%;max-width:420px}
+
+/* モーダル（iOS対策済み） */
+.modal{
+  display:none;
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,.6);
+  justify-content:center;
+  align-items:flex-start;
+  overflow:auto;
+  -webkit-overflow-scrolling:touch;
+}
+.modalContent{
+  background:#fff;
+  padding:15px;
+  border-radius:6px;
+  width:95%;
+  max-width:420px;
+  margin:20px 0;
+  max-height:90vh;
+  overflow-y:auto;
+}
+
 .flex{display:flex;gap:6px}
-.history{font-size:13px;background:#f7f7f7;padding:6px;margin-top:6px}
 #scanner{width:100%;height:240px}
 </style>
 
@@ -83,7 +108,7 @@ button{cursor:pointer}
 <div class="modalContent">
 <h3>商品登録 / 編集</h3>
 <p id="mBarcode"></p>
-<p>現在庫：<b id="mStock"></b></p>
+<p>現在庫：<b id="mStock">0</b></p>
 
 <input id="mName" placeholder="商品名">
 
@@ -126,7 +151,7 @@ firebase.initializeApp({
 
 const auth=firebase.auth(),db=firebase.firestore()
 const el=id=>document.getElementById(id)
-let currentBarcode=null, makerMap={}, categoryMap={}, filter={}
+let currentBarcode=null,filter={},makerMap={},categoryMap={}
 
 /* 認証 */
 function login(){auth.signInWithEmailAndPassword(el('email').value,el('password').value)}
@@ -172,16 +197,18 @@ async function addMaster(col){
   loadMasters()
 }
 async function editMaster(col,sel){
-  const id=sel.value;if(!id)return
-  const d=await db.collection(col).doc(id).get()
+  if(!sel.value)return
+  const d=await db.collection(col).doc(sel.value).get()
   const n=prompt("新名称",d.data().name)
-  if(n) await db.collection(col).doc(id).update({name:n})
+  if(n)await db.collection(col).doc(sel.value).update({name:n})
   loadMasters()
 }
 async function deleteMaster(col,sel){
-  const id=sel.value;if(!id)return
-  if(confirm("削除しますか？")) await db.collection(col).doc(id).delete()
-  loadMasters()
+  if(!sel.value)return
+  if(confirm("削除しますか？")){
+    await db.collection(col).doc(sel.value).delete()
+    loadMasters()
+  }
 }
 
 /* モーダル */
@@ -195,7 +222,6 @@ async function openModal(barcode){
 
   const ref=db.collection("products").doc(barcode)
   const s=await ref.get()
-  let stock=0
   if(s.exists){
     const p=s.data()
     el('mName').value=p.name||""
@@ -203,9 +229,13 @@ async function openModal(barcode){
     el('mCategory').value=p.categoryId||""
     el('mSell').value=p.sellPrice||0
     el('mAvg').textContent=p.avgBuyPrice||0
-    stock=p.stock||0
+    el('mStock').textContent=p.stock||0
+  }else{
+    el('mName').value=""
+    el('mSell').value=0
+    el('mAvg').textContent=0
+    el('mStock').textContent=0
   }
-  el('mStock').textContent=stock
 }
 function closeModal(){el('modal').style.display="none"}
 
@@ -218,18 +248,18 @@ async function saveOnly(){
     categoryId:el('mCategory').value,
     sellPrice:+el('mSell').value||0
   },{merge:true})
-  loadProducts()
+  closeModal();loadProducts()
 }
 
-/* 在庫 */
+/* 在庫操作 */
 async function stockAction(type){
   const ref=db.collection("products").doc(currentBarcode)
   const s=await ref.get()
   let stock=s.exists?(s.data().stock||0):0
   const q=+el('mQty').value
   if(type!=="in"&&stock<q)return alert("在庫不足")
-  stock+=type==="in"?q:-q
 
+  stock+=type==="in"?q:-q
   let total=s.exists?(s.data().totalBuy||0):0
   let cnt=s.exists?(s.data().totalQty||0):0
   if(type==="in"){
@@ -293,7 +323,8 @@ async function loadProducts(){
       <li class="product">
         <b>${p.name||"(未入力)"}</b><br>
         ${p.barcode}<br>
-        在庫：<span class="${p.stock==0?'out':''}">${p.stock||0}</span>
+        在庫：<span class="${p.stock==0?'out':''}">${p.stock||0}</span><br>
+        <button onclick="openModal('${p.barcode}')">✏️ 編集</button>
       </li>`
   })
 }
@@ -311,7 +342,6 @@ function exportCSV(){
     a.href=URL.createObjectURL(blob)
     a.download="inventory.csv"
     a.click()
-    URL.revokeObjectURL(a.href)
   })
 }
 
