@@ -3,7 +3,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>在庫管理アプリ（iPhone完全対応・履歴付き）</title>
+<title>在庫管理アプリ（iPhone / Android 完全版）</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <style>
@@ -28,12 +28,12 @@ button { cursor:pointer; }
 .csvBtn { background:#0a7; color:#fff; }
 .danger { background:#c00; color:#fff; }
 .stockView { font-weight:bold; margin-bottom:8px; }
+.history { font-size:13px; background:#f7f7f7; padding:6px; margin-top:8px; }
 </style>
 
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
-<script src="https://unpkg.com/quagga@0.12.1/dist/quagga.min.js"></script>
 </head>
 
 <body>
@@ -42,61 +42,46 @@ button { cursor:pointer; }
 <div id="loginDiv">
   <input id="email" placeholder="メール">
   <input id="password" type="password" placeholder="パスワード">
-  <button type="button" onclick="login()">ログイン</button>
-  <button type="button" onclick="signup()">新規登録</button>
+  <button onclick="login()">ログイン</button>
+  <button onclick="signup()">新規登録</button>
   <p id="loginMsg" style="color:red;"></p>
 </div>
 
 <div id="appDiv" class="hidden">
-<button type="button" onclick="logout()">ログアウト</button>
+<button onclick="logout()">ログアウト</button>
 
 <hr>
-<button type="button" id="scanBtn">📷 バーコードを読む</button>
-<div id="scanner"></div>
+<input id="manualBarcode" placeholder="バーコード">
+<button onclick="openModal(manualBarcode.value)">開く</button>
 
 <hr>
-<input id="manualBarcode" placeholder="手動バーコード">
-<button type="button" onclick="manualBarcodeSet()">開く</button>
-
-<hr>
-<h3>絞り込み</h3>
+<h3>絞り込み検索</h3>
 <input id="fBarcode" placeholder="バーコード">
 <input id="fName" placeholder="商品名">
 <select id="fMaker"></select>
 <select id="fCategory"></select>
-<button type="button" onclick="applyFilter()">検索</button>
-<button type="button" onclick="clearFilter()">解除</button>
+<button onclick="applyFilter()">検索</button>
+<button onclick="clearFilter()">解除</button>
 
 <hr>
 <h3>並び替え</h3>
 <select id="sortKey">
   <option value="">なし</option>
   <option value="name">商品名</option>
-  <option value="category">カテゴリ</option>
   <option value="manufacturer">メーカー</option>
+  <option value="category">カテゴリ</option>
   <option value="stock">在庫</option>
 </select>
 <select id="sortOrder">
   <option value="asc">昇順</option>
   <option value="desc">降順</option>
 </select>
-<button type="button" onclick="loadProducts()">並び替え</button>
+<button onclick="loadProducts()">並び替え</button>
 
-<button type="button" class="csvBtn" onclick="exportCSV()">CSV出力</button>
+<button class="csvBtn" onclick="exportCSV()">CSV出力</button>
 
 <hr>
 <ul id="productList"></ul>
-
-<hr>
-<h3>在庫履歴</h3>
-<select id="logFilter">
-  <option value="">すべて</option>
-  <option value="in">仕入</option>
-  <option value="out">販売</option>
-  <option value="use">使用</option>
-</select>
-<button type="button" onclick="loadLogs()">更新</button>
-<ul id="logList"></ul>
 </div>
 
 <!-- モーダル -->
@@ -107,20 +92,19 @@ button { cursor:pointer; }
 <p class="stockView">現在庫：<span id="modalStock">0</span></p>
 
 <input id="modalName" placeholder="商品名">
-
 <select id="modalMaker"></select>
 <select id="modalCategory"></select>
 
 <input id="modalQty" type="number" min="1" value="1">
-<input id="modalPrice" type="number" placeholder="仕入価格">
-<input id="modalRetail" type="number" placeholder="販売価格">
+<button onclick="submitStock('in')">仕入</button>
+<button onclick="submitStock('out')">販売</button>
+<button onclick="submitStock('use')">使用</button>
 
-<button type="button" onclick="saveOnly()">保存</button>
-<button type="button" onclick="submitModal('in')">仕入</button>
-<button type="button" onclick="submitModal('out')">販売</button>
-<button type="button" onclick="submitModal('use')">使用</button>
-<button type="button" class="danger" onclick="deleteProduct()">削除</button>
-<button type="button" onclick="closeModal()">キャンセル</button>
+<button onclick="saveOnly()">保存</button>
+<button class="danger" onclick="deleteProduct()">削除</button>
+<button onclick="closeModal()">閉じる</button>
+
+<div id="history" class="history"></div>
 </div>
 </div>
 
@@ -144,12 +128,9 @@ function logout(){auth.signOut();}
 
 /* マスター */
 async function loadMaster(col, sel, all=false){
-  sel.innerHTML = all ? "<option value=''>すべて</option>" : "";
+  sel.innerHTML=all?"<option value=''>すべて</option>":"";
   const s=await db.collection(col).orderBy("name").get();
-  s.forEach(d=>{
-    const n=d.data().name;
-    sel.insertAdjacentHTML("beforeend",`<option value="${n}">${n}</option>`);
-  });
+  s.forEach(d=>sel.innerHTML+=`<option>${d.data().name}</option>`);
 }
 async function loadMasters(){
   await loadMaster("makers",modalMaker);
@@ -160,17 +141,18 @@ async function loadMasters(){
 
 /* モーダル */
 async function openModal(barcode){
+  if(!barcode) return;
   currentBarcode=barcode;
   modal.style.display="flex";
-  modalBarcode.textContent="バーコード: "+barcode;
-  modalStock.textContent="0";
+  modalBarcode.textContent="バーコード："+barcode;
   modalName.value="";
   modalQty.value=1;
-  modalPrice.value="";
-  modalRetail.value="";
-  await loadMasters();
+  modalStock.textContent="0";
+  history.innerHTML="";
 
-  const s=await db.collection("products").doc(barcode).get();
+  await loadMasters();
+  const ref=db.collection("products").doc(barcode);
+  const s=await ref.get();
   if(s.exists){
     const p=s.data();
     modalName.value=p.name||"";
@@ -178,6 +160,12 @@ async function openModal(barcode){
     modalCategory.value=p.category||"";
     modalStock.textContent=p.stock||0;
   }
+
+  const h=await ref.collection("history").orderBy("time","desc").limit(10).get();
+  h.forEach(d=>{
+    const x=d.data();
+    history.innerHTML+=`${x.type} ${x.qty}（${new Date(x.time).toLocaleString()}）<br>`;
+  });
 }
 function closeModal(){ modal.style.display="none"; }
 
@@ -192,36 +180,22 @@ async function saveOnly(){
   loadProducts(); closeModal();
 }
 
-/* 入出庫＋履歴 */
-async function submitModal(type){
+/* 在庫処理 + 履歴 */
+async function submitStock(type){
   const ref=db.collection("products").doc(currentBarcode);
   const s=await ref.get();
   let stock=s.exists?(s.data().stock||0):0;
-  const qty=+modalQty.value||0;
+  const q=+modalQty.value;
+  if(type!=="in" && stock<q) return alert("在庫不足");
 
-  if(type==="in") stock+=qty;
-  else {
-    if(stock<qty) return alert("在庫不足");
-    stock-=qty;
-  }
+  stock += (type==="in"?q:-q);
 
-  await ref.set({
-    barcode:currentBarcode,
-    name:modalName.value,
-    manufacturer:modalMaker.value,
-    category:modalCategory.value,
-    stock
-  },{merge:true});
-
-  await db.collection("inventory_logs").add({
-    barcode:currentBarcode,
-    name:modalName.value,
-    type,
-    qty,
-    createdAt:firebase.firestore.FieldValue.serverTimestamp()
+  await ref.set({stock},{merge:true});
+  await ref.collection("history").add({
+    type, qty:q, time:Date.now()
   });
 
-  loadProducts(); loadLogs(); closeModal();
+  loadProducts(); closeModal();
 }
 
 /* 削除 */
@@ -232,7 +206,7 @@ async function deleteProduct(){
   }
 }
 
-/* 一覧 */
+/* 一覧 + 並び替え */
 async function loadProducts(){
   productList.innerHTML="";
   products=[];
@@ -246,78 +220,52 @@ async function loadProducts(){
     products.push(p);
   });
 
+  const k=sortKey.value,o=sortOrder.value;
+  if(k) products.sort((a,b)=>{
+    const A=a[k]??"",B=b[k]??"";
+    return typeof A==="number"
+      ? (o==="asc"?A-B:B-A)
+      : (o==="asc"?String(A).localeCompare(B,"ja"):String(B).localeCompare(A,"ja"));
+  });
+
   products.forEach(p=>{
-    productList.insertAdjacentHTML("beforeend",`
+    productList.innerHTML+=`
       <li class="product">
         <strong>${p.name||"(未入力)"}</strong><br>
         ${p.barcode}<br>
         ${p.manufacturer||""} / ${p.category||""}<br>
         在庫：<span class="${(p.stock||0)===0?'out':''}">${p.stock||0}</span><br>
-        <button type="button" onclick="openModal('${p.barcode}')">編集</button>
-      </li>
-    `);
+        <button onclick="openModal('${p.barcode}')">編集</button>
+      </li>`;
   });
 }
 
-/* フィルタ */
+/* 検索 */
 function applyFilter(){
-  filter={
-    barcode:fBarcode.value.trim(),
-    name:fName.value.trim(),
-    maker:fMaker.value,
-    category:fCategory.value
-  };
+  filter={barcode:fBarcode.value,name:fName.value,maker:fMaker.value,category:fCategory.value};
   loadProducts();
 }
 function clearFilter(){
-  filter={};
-  fBarcode.value=fName.value="";
+  filter={}; fBarcode.value=fName.value="";
   fMaker.value=fCategory.value="";
   loadProducts();
 }
 
-/* 履歴 */
-async function loadLogs(){
-  logList.innerHTML="";
-  let q=db.collection("inventory_logs").orderBy("createdAt","desc").limit(50);
-  if(logFilter.value) q=q.where("type","==",logFilter.value);
-  const s=await q.get();
-  s.forEach(d=>{
-    const l=d.data();
-    const label=l.type==="in"?"仕入":l.type==="out"?"販売":"使用";
-    const t=l.createdAt?.toDate()?.toLocaleString()||"";
-    logList.insertAdjacentHTML("beforeend",`
-      <li class="product">
-        <strong>${label}</strong> ${l.qty}個<br>
-        ${l.name}<br>
-        <small>${t}</small>
-      </li>
-    `);
+/* CSV */
+function exportCSV(){
+  let csv="バーコード,商品名,メーカー,カテゴリ,在庫\n";
+  products.forEach(p=>{
+    csv+=`${p.barcode},"${p.name||""}","${p.manufacturer||""}","${p.category||""}",${p.stock||0}\n`;
   });
+  location.href="data:text/csv;charset=utf-8,"+encodeURIComponent(csv);
 }
 
-/* バーコード */
-scanBtn.onclick=()=>{
-  Quagga.init({inputStream:{type:"LiveStream",target:"#scanner"},decoder:{readers:["ean_reader"]}},()=>{
-    Quagga.start();
-    Quagga.onDetected(d=>{
-      Quagga.stop();
-      openModal(d.codeResult.code);
-    });
-  });
-};
-function manualBarcodeSet(){
-  if(manualBarcode.value) openModal(manualBarcode.value.trim());
-  manualBarcode.value="";
-}
-
+/* 認証 */
 auth.onAuthStateChanged(u=>{
   if(u){
     loginDiv.classList.add("hidden");
     appDiv.classList.remove("hidden");
-    loadMasters();
-    loadProducts();
-    loadLogs();
+    loadMasters(); loadProducts();
   }
 });
 </script>
