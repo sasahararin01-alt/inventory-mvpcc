@@ -3,39 +3,26 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>在庫管理アプリ（iPhone / Android 完全対応）</title>
+<title>在庫管理アプリ</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <style>
-body{font-family:sans-serif;padding:10px;margin:0}
+body{font-family:sans-serif;margin:0;padding:10px}
 .hidden{display:none}
 .product{border-bottom:1px solid #ccc;padding:8px}
 .out{color:red;font-weight:bold}
 input,select,button{width:100%;font-size:16px;padding:8px;margin-bottom:6px}
 button{cursor:pointer}
 .flex{display:flex;gap:6px}
-
-/* iOS完全対応モーダル */
-.modal{
-  display:none;
-  position:fixed;
-  inset:0;
-  background:rgba(0,0,0,.6);
-  z-index:1000;
-}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;z-index:1000}
 .modalContent{
-  background:#fff;
-  width:95%;
-  max-width:420px;
-  margin:10px auto;
-  padding:15px;
-  border-radius:6px;
-  max-height:90vh;
-  overflow-y:auto;
+  background:#fff;width:95%;max-width:420px;
+  margin:10px auto;padding:15px;border-radius:6px;
+  max-height:90vh;overflow-y:auto;
   -webkit-overflow-scrolling:touch;
 }
-
-#scanner{width:100%;height:240px}
+.history li{font-size:14px;border-bottom:1px dotted #ccc;padding:4px}
+#scanner{height:240px}
 </style>
 
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
@@ -45,13 +32,13 @@ button{cursor:pointer}
 </head>
 
 <body>
-<h2>在庫管理アプリ</h2>
+<h2>在庫管理</h2>
 
 <div id="loginDiv">
-  <input id="email" placeholder="メール">
-  <input id="password" type="password" placeholder="パスワード">
-  <button onclick="login()">ログイン</button>
-  <button onclick="signup()">新規登録</button>
+<input id="email" placeholder="メール">
+<input id="password" type="password" placeholder="パスワード">
+<button onclick="login()">ログイン</button>
+<button onclick="signup()">新規登録</button>
 </div>
 
 <div id="appDiv" class="hidden">
@@ -61,12 +48,11 @@ button{cursor:pointer}
 <button onclick="startScan()">📷 バーコード読み取り</button>
 <div id="scanner"></div>
 
-<hr>
 <input id="manualBarcode" placeholder="バーコード手入力">
-<button onclick="openModal(manualBarcode.value)">開く</button>
+<button onclick="openModal(manualBarcode.value)">登録 / 編集</button>
 
 <hr>
-<h4>🔍 絞り込み検索</h4>
+<h4>🔍 絞り込み</h4>
 <input id="fName" placeholder="商品名">
 <input id="fBarcode" placeholder="バーコード">
 <select id="fMaker"></select>
@@ -80,17 +66,17 @@ button{cursor:pointer}
 <hr>
 <h4>↕ 並び替え</h4>
 <select id="sortKey">
-  <option value="">なし</option>
-  <option value="name">商品名</option>
-  <option value="stock">在庫数</option>
-  <option value="avgBuyPrice">仕入金額</option>
-  <option value="barcode">バーコード</option>
+<option value="">なし</option>
+<option value="name">商品名</option>
+<option value="stock">在庫数</option>
+<option value="avgBuyPrice">平均仕入</option>
+<option value="barcode">バーコード</option>
 </select>
 <select id="sortOrder">
-  <option value="asc">昇順</option>
-  <option value="desc">降順</option>
+<option value="asc">昇順</option>
+<option value="desc">降順</option>
 </select>
-<button onclick="loadProducts()">並び替え</button>
+<button onclick="loadProducts()">適用</button>
 
 <hr>
 <ul id="productList"></ul>
@@ -100,7 +86,6 @@ button{cursor:pointer}
 <div id="modal" class="modal">
 <div class="modalContent">
 <h3>商品登録 / 編集</h3>
-
 <p id="mBarcode"></p>
 <p>現在庫：<b id="mStock">0</b></p>
 
@@ -108,31 +93,33 @@ button{cursor:pointer}
 
 <select id="mMaker"></select>
 <div class="flex">
+<button onclick="addMaster('makers')">＋</button>
 <button onclick="editMaster('makers',mMaker)">✏️</button>
 <button onclick="deleteMaster('makers',mMaker)">🗑</button>
 </div>
-<input id="newMaker" placeholder="メーカー追加">
-<button onclick="addMaster('makers')">＋</button>
 
 <select id="mCategory"></select>
 <div class="flex">
+<button onclick="addMaster('categories')">＋</button>
 <button onclick="editMaster('categories',mCategory)">✏️</button>
 <button onclick="deleteMaster('categories',mCategory)">🗑</button>
 </div>
-<input id="newCategory" placeholder="カテゴリ追加">
-<button onclick="addMaster('categories')">＋</button>
 
-<input id="mSell" type="number" placeholder="上代（販売価格）">
+<input id="mSell" type="number" placeholder="上代">
 <input id="mBuy" type="number" placeholder="今回仕入単価">
-<p>平均仕入単価：<b id="mAvg">0</b></p>
-<input id="mVendor" placeholder="今回仕入問屋">
+<p>平均仕入：<b id="mAvg">0</b></p>
+<input id="mVendor" placeholder="仕入問屋">
 <input id="mQty" type="number" value="1" min="1">
 
-<button onclick="saveOnly()">💾 保存</button>
-<button onclick="stockAction('in')">📥 仕入</button>
-<button onclick="stockAction('out')">📤 販売</button>
-<button onclick="stockAction('use')">🧴 使用</button>
-<button onclick="closeModal()">❌ キャンセル</button>
+<button onclick="saveOnly()">保存</button>
+<button onclick="stockAction('in')">仕入</button>
+<button onclick="stockAction('out')">販売</button>
+<button onclick="stockAction('use')">使用</button>
+<button onclick="closeModal()">キャンセル</button>
+
+<hr>
+<h4>📦 在庫履歴（最新10件）</h4>
+<ul id="historyList" class="history"></ul>
 </div>
 </div>
 
@@ -142,10 +129,11 @@ firebase.initializeApp({
   authDomain:"inventory-mvpcc.firebaseapp.com",
   projectId:"inventory-mvpcc"
 })
-
 const auth=firebase.auth(),db=firebase.firestore()
 const el=id=>document.getElementById(id)
-let currentBarcode=null,filter={},makerMap={},categoryMap={}
+
+let currentBarcode="",filter={},list=[]
+let makers={},categories={}
 
 /* 認証 */
 function login(){auth.signInWithEmailAndPassword(el('email').value,el('password').value)}
@@ -154,9 +142,10 @@ function logout(){auth.signOut()}
 
 /* バーコード */
 function startScan(){
-  el('scanner').innerHTML=""
+  try{Quagga.stop()}catch(e){}
+  el("scanner").innerHTML=""
   Quagga.init({
-    inputStream:{type:"LiveStream",target:el('scanner'),constraints:{facingMode:"environment"}},
+    inputStream:{type:"LiveStream",target:el("scanner"),constraints:{facingMode:"environment"}},
     decoder:{readers:["ean_reader","code_128_reader"]}
   },()=>{
     Quagga.start()
@@ -167,188 +156,47 @@ function startScan(){
   })
 }
 
-/* マスター */
-async function loadMaster(col,sel,all){
-  sel.innerHTML=all?'<option value="">すべて</option>':''
-  const s=await db.collection(col).orderBy("name").get()
-  s.forEach(d=>{
-    sel.innerHTML+=`<option value="${d.id}">${d.data().name}</option>`
-    if(col==="makers") makerMap[d.id]=d.data().name
-    if(col==="categories") categoryMap[d.id]=d.data().name
-  })
-}
-async function loadMasters(){
-  makerMap={};categoryMap={}
-  await loadMaster("makers",el('fMaker'),true)
-  await loadMaster("categories",el('fCategory'),true)
-  await loadMaster("makers",el('mMaker'))
-  await loadMaster("categories",el('mCategory'))
-}
-async function addMaster(col){
-  const v=el(col==="makers"?'newMaker':'newCategory').value
-  if(!v)return
-  await db.collection(col).add({name:v})
-  loadMasters()
-}
-async function editMaster(col,sel){
-  if(!sel.value)return
-  const d=await db.collection(col).doc(sel.value).get()
-  const n=prompt("新名称",d.data().name)
-  if(n) await db.collection(col).doc(sel.value).update({name:n})
-  loadMasters()
-}
-async function deleteMaster(col,sel){
-  if(!sel.value)return
-  if(confirm("削除しますか？")){
-    await db.collection(col).doc(sel.value).delete()
-    loadMasters()
-  }
-}
-
 /* モーダル */
 async function openModal(barcode){
-  if(!barcode)return
+  if(!barcode){alert("バーコードを入力してください");return}
   currentBarcode=barcode
-  el('modal').style.display="block"
-  el('mBarcode').textContent="バーコード："+barcode
-  el('mQty').value=1
+  el("modal").style.display="block"
+  el("mBarcode").textContent="バーコード："+barcode
+  el("mQty").value=1
   await loadMasters()
+  loadHistory(barcode)
 
-  const ref=db.collection("products").doc(barcode)
-  const s=await ref.get()
+  const s=await db.collection("products").doc(barcode).get()
   if(s.exists){
     const p=s.data()
-    el('mName').value=p.name||""
-    el('mMaker').value=p.manufacturerId||""
-    el('mCategory').value=p.categoryId||""
-    el('mSell').value=p.sellPrice||0
-    el('mAvg').textContent=p.avgBuyPrice||0
-    el('mStock').textContent=p.stock||0
+    el("mName").value=p.name||""
+    el("mSell").value=p.sellPrice||0
+    el("mAvg").textContent=p.avgBuyPrice||0
+    el("mStock").textContent=p.stock||0
+    el("mVendor").value=p.lastVendor||""
+    el("mMaker").value=p.makerId||""
+    el("mCategory").value=p.categoryId||""
   }else{
-    el('mName').value=""
-    el('mSell').value=0
-    el('mAvg').textContent=0
-    el('mStock').textContent=0
+    el("mName").value=""
+    el("mSell").value=0
+    el("mAvg").textContent=0
+    el("mStock").textContent=0
+    el("mVendor").value=""
   }
 }
-function closeModal(){el('modal').style.display="none"}
-
-/* 保存 */
-async function saveOnly(){
-  await db.collection("products").doc(currentBarcode).set({
-    barcode:currentBarcode,
-    name:el('mName').value,
-    manufacturerId:el('mMaker').value,
-    categoryId:el('mCategory').value,
-    sellPrice:+el('mSell').value||0
-  },{merge:true})
-  closeModal();loadProducts()
-}
-
-/* 在庫操作 */
-async function stockAction(type){
-  const ref=db.collection("products").doc(currentBarcode)
-  const s=await ref.get()
-  let stock=s.exists?(s.data().stock||0):0
-  const q=+el('mQty').value
-  if(type!=="in" && stock<q) return alert("在庫不足")
-
-  stock+=type==="in"?q:-q
-
-  let total=s.exists?(s.data().totalBuy||0):0
-  let cnt=s.exists?(s.data().totalQty||0):0
-  if(type==="in"){
-    total+=q*(+el('mBuy').value||0)
-    cnt+=q
-  }
-
-  await ref.set({
-    stock,
-    totalBuy:total,
-    totalQty:cnt,
-    avgBuyPrice:cnt?Math.round(total/cnt):0
-  },{merge:true})
-
-  closeModal();loadProducts()
-}
-
-/* フィルタ・並び替え */
-function applyFilter(){
-  filter={
-    name:el('fName').value,
-    barcode:el('fBarcode').value,
-    maker:el('fMaker').value,
-    category:el('fCategory').value
-  }
-  loadProducts()
-}
-function clearFilter(){
-  filter={}
-  el('fName').value=""
-  el('fBarcode').value=""
-  el('fMaker').value=""
-  el('fCategory').value=""
-  loadProducts()
-}
-
-async function loadProducts(){
-  el('productList').innerHTML=""
-  let list=[]
-  const s=await db.collection("products").get()
-  s.forEach(d=>{
-    const p=d.data()
-    if(filter.name && !(p.name||"").includes(filter.name))return
-    if(filter.barcode && !(p.barcode||"").includes(filter.barcode))return
-    if(filter.maker && p.manufacturerId!==filter.maker)return
-    if(filter.category && p.categoryId!==filter.category)return
-    list.push(p)
-  })
-
-  const k=el('sortKey').value,o=el('sortOrder').value
-  if(k){
-    list.sort((a,b)=>{
-      const A=a[k]??"",B=b[k]??""
-      return typeof A==="number"
-        ? (o==="asc"?A-B:B-A)
-        : (o==="asc"?String(A).localeCompare(B,"ja"):String(B).localeCompare(A,"ja"))
-    })
-  }
-
-  list.forEach(p=>{
-    el('productList').innerHTML+=`
-      <li class="product">
-        <b>${p.name||"(未入力)"}</b><br>
-        ${p.barcode}<br>
-        在庫：<span class="${p.stock==0?'out':''}">${p.stock||0}</span><br>
-        <button onclick="openModal('${p.barcode}')">✏️ 編集</button>
-      </li>`
-  })
-}
+function closeModal(){el("modal").style.display="none"}
 
 /* CSV */
 function exportCSV(){
-  let csv="バーコード,商品名,在庫,平均仕入\n"
-  db.collection("products").get().then(s=>{
-    s.forEach(d=>{
-      const p=d.data()
-      csv+=`${p.barcode},"${p.name||""}",${p.stock||0},${p.avgBuyPrice||0}\n`
-    })
-    const blob=new Blob([csv],{type:"text/csv"})
-    const a=document.createElement("a")
-    a.href=URL.createObjectURL(blob)
-    a.download="inventory.csv"
-    a.click()
+  let csv="商品名,バーコード,メーカー,カテゴリ,在庫,平均仕入\n"
+  list.forEach(p=>{
+    csv+=`${p.name},${p.barcode},${makers[p.makerId]||""},${categories[p.categoryId]||""},${p.stock},${p.avgBuyPrice||0}\n`
   })
+  const blob=new Blob([csv],{type:"text/csv"})
+  const url=URL.createObjectURL(blob)
+  const a=document.createElement("a")
+  a.href=url
+  a.download="inventory.csv"
+  a.click()
+  setTimeout(()=>URL.revokeObjectURL(url),1000)
 }
-
-auth.onAuthStateChanged(u=>{
-  if(u){
-    el('loginDiv').classList.add("hidden")
-    el('appDiv').classList.remove("hidden")
-    loadMasters()
-    loadProducts()
-  }
-})
-</script>
-</body>
-</html>
