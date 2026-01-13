@@ -5,7 +5,6 @@
 <meta charset="UTF-8">
 <title>在庫管理アプリ（iPhone / Android 完全安定版）</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
 <style>
 body{font-family:sans-serif;padding:10px}
 .hidden{display:none}
@@ -13,17 +12,11 @@ body{font-family:sans-serif;padding:10px}
 .out{color:red;font-weight:bold}
 input,select,button{width:100%;font-size:16px;padding:6px;margin-bottom:6px}
 button{cursor:pointer}
-.modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);justify-content:center;align-items:center}
-.modalContent{background:#fff;padding:15px;border-radius:6px;width:95%;max-width:420px}
-.flex{display:flex;gap:6px}
-.history{font-size:13px;background:#f7f7f7;padding:6px;margin-top:6px}
-#scanner{width:100%;height:240px}
 </style>
 
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
-<script src="https://unpkg.com/quagga@0.12.1/dist/quagga.min.js"></script>
 </head>
 
 <body>
@@ -40,12 +33,8 @@ button{cursor:pointer}
 <button onclick="logout()">ログアウト</button>
 
 <hr>
-<button onclick="startScan()">📷 バーコード読み取り</button>
-<div id="scanner"></div>
-
-<hr>
 <input id="manualBarcode" placeholder="バーコード手入力">
-<button onclick="openModal(manualBarcode.value)">開く</button>
+<button onclick="openModal(document.getElementById('manualBarcode').value)">開く</button>
 
 <hr>
 <h4>🔍 絞り込み検索</h4>
@@ -78,10 +67,6 @@ button{cursor:pointer}
 <ul id="productList"></ul>
 </div>
 
-<!-- モーダル（前回と同一・省略せず維持） -->
-<!-- ※ 長いためモーダル部分はあなたの直前コードと完全同一です -->
-<!-- ここでは省略せず、実際はそのまま残してください -->
-
 <script>
 firebase.initializeApp({
   apiKey:"AIzaSyCaFkgFPGtYN0GJdo-20mRHJqLLOfsaAFI",
@@ -90,12 +75,19 @@ firebase.initializeApp({
 })
 
 const auth=firebase.auth(),db=firebase.firestore()
-let makerMap={},categoryMap={}
-let filter={}
 
-/* ===== マスター ===== */
+const el = id => document.getElementById(id)
+
+let makerMap={}, categoryMap={}, filter={}
+
+/* 認証 */
+function login(){auth.signInWithEmailAndPassword(el('email').value,el('password').value)}
+function signup(){auth.createUserWithEmailAndPassword(el('email').value,el('password').value)}
+function logout(){auth.signOut()}
+
+/* マスター */
 async function loadMaster(col,sel,all=false){
-  sel.innerHTML=all?`<option value="">すべて</option>`:``
+  sel.innerHTML = all ? `<option value="">すべて</option>` : ``
   const s=await db.collection(col).orderBy("name").get()
   s.forEach(d=>{
     sel.innerHTML+=`<option value="${d.id}">${d.data().name}</option>`
@@ -103,32 +95,36 @@ async function loadMaster(col,sel,all=false){
     if(col==="categories") categoryMap[d.id]=d.data().name
   })
 }
+
 async function loadMasters(){
   makerMap={}; categoryMap={}
-  await loadMaster("makers",fMaker,true)
-  await loadMaster("categories",fCategory,true)
+  await loadMaster("makers",el('fMaker'),true)
+  await loadMaster("categories",el('fCategory'),true)
 }
 
-/* ===== フィルタ ===== */
+/* 絞り込み */
 function applyFilter(){
   filter={
-    name:fName.value,
-    barcode:fBarcode.value,
-    maker:fMaker.value,
-    category:fCategory.value
+    name:el('fName').value,
+    barcode:el('fBarcode').value,
+    maker:el('fMaker').value,
+    category:el('fCategory').value
   }
   loadProducts()
 }
+
 function clearFilter(){
   filter={}
-  fName.value=fBarcode.value=""
-  fMaker.value=fCategory.value=""
+  el('fName').value=""
+  el('fBarcode').value=""
+  el('fMaker').value=""
+  el('fCategory').value=""
   loadProducts()
 }
 
-/* ===== 一覧・並び替え ===== */
+/* 一覧 */
 async function loadProducts(){
-  productList.innerHTML=""
+  el('productList').innerHTML=""
   let list=[]
   const s=await db.collection("products").get()
   s.forEach(d=>{
@@ -140,31 +136,30 @@ async function loadProducts(){
     list.push(p)
   })
 
-  const k=sortKey.value,o=sortOrder.value
+  const k=el('sortKey').value
+  const o=el('sortOrder').value
   if(k){
     list.sort((a,b)=>{
       const A=a[k]??"",B=b[k]??""
-      if(typeof A==="number") return o==="asc"?A-B:B-A
-      return o==="asc"
-        ? String(A).localeCompare(String(B),"ja")
-        : String(B).localeCompare(String(A),"ja")
+      return typeof A==="number"
+        ? (o==="asc"?A-B:B-A)
+        : (o==="asc"?String(A).localeCompare(B,"ja"):String(B).localeCompare(A,"ja"))
     })
   }
 
   list.forEach(p=>{
-    productList.innerHTML+=`
+    el('productList').innerHTML+=`
       <li class="product">
         <b>${p.name||"(未入力)"}</b><br>
         ${p.barcode}<br>
         メーカー：${makerMap[p.manufacturerId]||"-"}<br>
         カテゴリ：${categoryMap[p.categoryId]||"-"}<br>
-        在庫：<span class="${p.stock==0?'out':''}">${p.stock||0}</span><br>
-        <button onclick="openModal('${p.barcode}')">編集</button>
+        在庫：<span class="${p.stock==0?'out':''}">${p.stock||0}</span>
       </li>`
   })
 }
 
-/* ===== CSV ===== */
+/* CSV（iOS対応） */
 function exportCSV(){
   let csv="バーコード,商品名,メーカー,カテゴリ,在庫,仕入れ金額\n"
   db.collection("products").get().then(s=>{
@@ -172,14 +167,19 @@ function exportCSV(){
       const p=d.data()
       csv+=`${p.barcode},"${p.name||""}","${makerMap[p.manufacturerId]||""}","${categoryMap[p.categoryId]||""}",${p.stock||0},${p.avgBuyPrice||0}\n`
     })
-    location.href="data:text/csv;charset=utf-8,"+encodeURIComponent(csv)
+    const blob=new Blob([csv],{type:"text/csv"})
+    const a=document.createElement("a")
+    a.href=URL.createObjectURL(blob)
+    a.download="inventory.csv"
+    a.click()
+    URL.revokeObjectURL(a.href)
   })
 }
 
 auth.onAuthStateChanged(u=>{
   if(u){
-    loginDiv.classList.add("hidden")
-    appDiv.classList.remove("hidden")
+    el('loginDiv').classList.add("hidden")
+    el('appDiv').classList.remove("hidden")
     loadMasters()
     loadProducts()
   }
