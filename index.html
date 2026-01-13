@@ -59,6 +59,34 @@ button { cursor:pointer; }
 <button onclick="manualBarcodeSet()">開く</button>
 
 <hr>
+<h3>絞り込み検索</h3>
+<input id="fBarcode" placeholder="バーコード">
+<input id="fName" placeholder="商品名">
+<select id="fMaker"></select>
+<select id="fCategory"></select>
+<button onclick="applyFilter()">検索</button>
+<button onclick="clearFilter()">解除</button>
+
+<hr>
+<h3>並び替え</h3>
+<select id="sortKey">
+  <option value="">なし</option>
+  <option value="name">商品名</option>
+  <option value="category">カテゴリ</option>
+  <option value="manufacturer">メーカー</option>
+  <option value="stock">在庫</option>
+  <option value="latestPrice">仕入価格</option>
+  <option value="retailPrice">販売価格</option>
+</select>
+<select id="sortOrder">
+  <option value="asc">昇順</option>
+  <option value="desc">降順</option>
+</select>
+<button onclick="loadProducts()">並び替え</button>
+
+<button class="csvBtn" onclick="exportCSV()">CSV出力</button>
+
+<hr>
 <ul id="productList"></ul>
 </div>
 
@@ -67,8 +95,6 @@ button { cursor:pointer; }
 <div class="modalContent">
 <h3>商品登録 / 編集</h3>
 <p id="modalBarcode"></p>
-
-<!-- ★ 現在在庫表示（追加） -->
 <p class="stockView">現在庫：<span id="modalStock">0</span></p>
 
 <input id="modalName" placeholder="商品名">
@@ -94,14 +120,12 @@ button { cursor:pointer; }
 <button onclick="saveOnly()">保存</button>
 <button onclick="submitModal('in')">仕入</button>
 <button onclick="submitModal('out')">販売</button>
-
 <button class="danger" onclick="deleteProduct()">削除</button>
 <button onclick="closeModal()">キャンセル</button>
 </div>
 </div>
 
 <script>
-/* Firebase */
 firebase.initializeApp({
   apiKey:"AIzaSyCaFkgFPGtYN0GJdo-20mRHJqLLOfsaAFI",
   authDomain:"inventory-mvpcc.firebaseapp.com",
@@ -112,6 +136,7 @@ const db=firebase.firestore();
 
 let currentBarcode=null;
 let products=[];
+let filter={};
 
 /* 認証 */
 function login(){auth.signInWithEmailAndPassword(email.value,password.value).catch(e=>loginMsg.textContent=e.message);}
@@ -119,8 +144,8 @@ function signup(){auth.createUserWithEmailAndPassword(email.value,password.value
 function logout(){auth.signOut();}
 
 /* マスター */
-async function loadMaster(col, sel){
-  sel.innerHTML="";
+async function loadMaster(col, sel, all=false){
+  sel.innerHTML = all ? "<option value=''>すべて</option>" : "";
   const s=await db.collection(col).orderBy("name").get();
   s.forEach(d=>{
     const n=d.data().name;
@@ -130,14 +155,16 @@ async function loadMaster(col, sel){
 async function loadMasters(){
   await loadMaster("makers",modalMaker);
   await loadMaster("categories",modalCategory);
+  await loadMaster("makers",fMaker,true);
+  await loadMaster("categories",fCategory,true);
 }
 function addMaster(col){
   const n=prompt("追加する名前");
   if(n) db.collection(col).add({name:n}).then(loadMasters);
 }
 function editMaster(col){
-  const b=prompt("変更前の名前");
-  const a=prompt("変更後の名前");
+  const b=prompt("変更前");
+  const a=prompt("変更後");
   if(!b||!a) return;
   db.collection(col).where("name","==",b).get().then(s=>{
     s.forEach(d=>d.ref.update({name:a}));
@@ -145,7 +172,7 @@ function editMaster(col){
 }
 function deleteMaster(col){
   const n=prompt("削除する名前");
-  if(!n || !confirm(`「${n}」を削除しますか？`)) return;
+  if(!n||!confirm(`「${n}」を削除しますか？`)) return;
   db.collection(col).where("name","==",n).get().then(s=>{
     s.forEach(d=>d.ref.delete());
   }).then(loadMasters);
@@ -156,13 +183,13 @@ async function openModal(barcode){
   currentBarcode=barcode;
   modal.style.display="flex";
   modalBarcode.textContent="バーコード: "+barcode;
+  modalStock.textContent="0";
   modalName.value="";
   modalQty.value=1;
   modalPrice.value="";
   modalRetail.value="";
-  modalStock.textContent="0";
-
   await loadMasters();
+
   const s=await db.collection("products").doc(barcode).get();
   if(s.exists){
     const p=s.data();
@@ -174,14 +201,10 @@ async function openModal(barcode){
     modalStock.textContent=p.stock||0;
   }
 }
-function closeModal(){
-  currentBarcode=null;
-  modal.style.display="none";
-}
+function closeModal(){ currentBarcode=null; modal.style.display="none"; }
 
 /* 保存 */
 async function saveOnly(){
-  if(!currentBarcode) return;
   await db.collection("products").doc(currentBarcode).set({
     barcode:currentBarcode,
     name:modalName.value,
@@ -212,13 +235,12 @@ async function submitModal(type){
     latestPrice:+modalPrice.value||0,
     retailPrice:+modalRetail.value||0
   },{merge:true});
-
   loadProducts(); closeModal();
 }
 
 /* 削除 */
 async function deleteProduct(){
-  if(currentBarcode && confirm("削除しますか？")){
+  if(confirm("削除しますか？")){
     await db.collection("products").doc(currentBarcode).delete();
     loadProducts(); closeModal();
   }
@@ -231,8 +253,19 @@ async function loadProducts(){
   const s=await db.collection("products").get();
   s.forEach(d=>{
     const p=d.data();
+    if(filter.barcode && !p.barcode.includes(filter.barcode)) return;
+    if(filter.name && !p.name?.includes(filter.name)) return;
+    if(filter.maker && p.manufacturer!==filter.maker) return;
+    if(filter.category && p.category!==filter.category) return;
     products.push(p);
   });
+
+  const k=sortKey.value,o=sortOrder.value;
+  if(k) products.sort((a,b)=>{
+    const A=a[k]||"",B=b[k]||"";
+    return typeof A==="string"?(o==="asc"?A.localeCompare(B):B.localeCompare(A)):(o==="asc"?A-B:B-A);
+  });
+
   products.forEach(p=>{
     productList.insertAdjacentHTML("beforeend",`
       <li class="product">
@@ -244,6 +277,32 @@ async function loadProducts(){
       </li>
     `);
   });
+}
+
+/* 検索 */
+function applyFilter(){
+  filter={
+    barcode:fBarcode.value.trim(),
+    name:fName.value.trim(),
+    maker:fMaker.value,
+    category:fCategory.value
+  };
+  loadProducts();
+}
+function clearFilter(){
+  filter={};
+  fBarcode.value=fName.value="";
+  fMaker.value=fCategory.value="";
+  loadProducts();
+}
+
+/* CSV */
+function exportCSV(){
+  let csv="バーコード,商品名,メーカー,カテゴリ,在庫,仕入価格,販売価格\n";
+  products.forEach(p=>{
+    csv+=`${p.barcode},"${p.name||""}","${p.manufacturer||""}","${p.category||""}",${p.stock||0},${p.latestPrice||0},${p.retailPrice||0}\n`;
+  });
+  location.href="data:text/csv;charset=utf-8,"+encodeURIComponent(csv);
 }
 
 /* バーコード */
@@ -262,7 +321,6 @@ function manualBarcodeSet(){
   manualBarcode.value="";
 }
 
-/* 認証状態 */
 auth.onAuthStateChanged(u=>{
   if(u){
     loginDiv.classList.add("hidden");
